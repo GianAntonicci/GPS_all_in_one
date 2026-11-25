@@ -7,6 +7,8 @@
 #include "debug_console.h"
 #include "display.h"
 #include "map_view.h"
+#include "audio.h"
+#include "audio_cues.h"
 #include "input.h"
 #include "input_logic.h"
 #include "keyboard.h"
@@ -54,6 +56,7 @@ uint32_t gBannerUntil = 0;
 uint32_t gSeenAt = 0;
 bool gSeenEver = false;
 bool gDirty = true;
+AudioCues gCues;
 bool gMapPending = false;  // a tela Mapa ainda tem tile para carregar
 bool gScreenWasOn = true;
 
@@ -199,6 +202,10 @@ void onSettingsInput(int8_t d, Gesture g, uint32_t now) {
     if (nv > 100) nv = 100;
     val = (uint8_t)nv;
     if (v.editing == 2) applyBrightness(true);
+    if (v.editing == 3 && d) {
+      audioSetVolume(v.volume);
+      audioPlay(Pattern::Click);  // prévia no volume novo
+    }
     if (g == Gesture::Click) {
       v.editing = -1;
       saveSettings();
@@ -318,6 +325,7 @@ void onRadioEvent(const RadioEvt& e, const SharedState& s, uint32_t now) {
   switch (e.kind) {
     case RadioEvtKind::Packet:
       if (e.pkt.type == PktType::MSG) {
+        audioPlay(Pattern::Message);
         gHistory.addReceived(e.pkt.id, e.pkt.text, s.timeValid, s.localTime.hour,
                              s.localTime.minute);
         onHistoryAdded();
@@ -426,6 +434,7 @@ void uiTask(void*) {
   mapInit();
   oledBegin();
   inputBegin();
+  audioBegin(gSet->volume);
   gSetView.brightness = brightnessPctFromRaw(gSet->brightness);
   applyBrightness(true);
   uint32_t lastFrame = 0, lastOled = 0, lastRefresh = 0;
@@ -451,6 +460,7 @@ void uiTask(void*) {
         g = Gesture::None;  // só acordou a tela
       }
     }
+    audioPlay(AudioCues::forGesture(g));
     if (gSosRequest.exchange(false)) {
       gOverlay.requestCountdown(now);
       gWake.wake(now);
@@ -465,6 +475,22 @@ void uiTask(void*) {
     }
     for (SosAction a = gOverlay.tick(now); a != SosAction::None; a = gOverlay.tick(now))
       handleAction(a, now);
+    {
+      // Sons do SOS: roda com a tela acesa ou apagada.
+      CueOut o = gCues.update({gOverlay.top(), gOverlay.counting(), gOverlay.countdownLeft(now),
+                               s.mySos});
+      static uint32_t lastAlarm = 0;
+      for (uint8_t i = 0; i < o.n; ++i) {
+        // O alarme é reafirmado a cada iteração; manda no máximo 2x/s para não lotar a fila.
+        if (o.play[i] == Pattern::PeerAlarm) {
+          if (lastAlarm && now - lastAlarm < 500) continue;
+          lastAlarm = now ? now : 1;
+        }
+        audioPlay(o.play[i]);
+      }
+      if (o.stopAlarm) lastAlarm = 0;
+      if (o.stopAlarm) audioStop(Pattern::PeerAlarm);
+    }
     flushRetries();
 
     // Tela acesa/apagada
