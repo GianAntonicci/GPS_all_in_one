@@ -30,6 +30,12 @@ struct SharedState {
   bool courseKnown = false, courseStale = true;
   bool timeValid = false;
   DateTime localTime{};     // UTC-3
+  DateTime utcTime{};       // hora do GPS em UTC (GPX)
+
+  // ---- SD e trilha (task "sd") ----
+  bool sdOk = false;            // cartão montado
+  bool trackRecording = false;  // arquivo GPX aberto e gravando
+  uint32_t trackPoints = 0;     // pontos no arquivo atual
 
   // ---- Bateria ----
   uint32_t batteryMv = 0;

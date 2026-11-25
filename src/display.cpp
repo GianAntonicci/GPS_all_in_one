@@ -1,5 +1,6 @@
 #include "display.h"
 
+#include <atomic>
 #include "config.h"
 #include "spi_bus.h"
 
@@ -8,6 +9,7 @@ TFT_eSPI gTft;
 TFT_eSprite gFrame(&gTft);
 constexpr uint8_t kBlChannel = 0;
 constexpr uint32_t kBlFreq = 5000;
+std::atomic<bool> gReady{false};
 }  // namespace
 
 bool displayBegin() {
@@ -23,6 +25,7 @@ bool displayBegin() {
   gFrame.setColorDepth(16);
   void* buf = gFrame.createSprite(SCREEN_W, SCREEN_H);  // PSRAM quando disponível
   if (!buf) LOGE("Display: sem memoria para o quadro 320x240");
+  gReady = true;  // o SPI já está configurado, mesmo sem quadro
   return buf != nullptr;
 }
 
@@ -33,6 +36,9 @@ void displayPush() {
   gFrame.pushSprite(0, 0);
   spiUnlock();
 }
+
+bool displayReady() { return gReady; }
+SPIClass& displaySpi() { return TFT_eSPI::getSPIinstance(); }
 
 void displaySetBrightness(uint8_t pct) {
   if (pct > 100) pct = 100;

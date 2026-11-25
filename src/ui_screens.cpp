@@ -276,6 +276,8 @@ void drawGps(TFT_eSprite& f, const SharedState& s) {
   snprintf(b, sizeof b, "Bateria %u%% (%lu mV)%s", s.batteryPct, (unsigned long)s.batteryMv,
            s.batteryLow ? " BAIXA" : "");
   line(b);
+  fmtTrackStatus(b, sizeof b, s.sdOk, s.trackRecording, s.trackPoints, s.timeValid, s.gpsFix);
+  line(b);
 }
 
 void drawSoon(TFT_eSprite& f, const char* title, const char* msg) {
