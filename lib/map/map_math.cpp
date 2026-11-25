@@ -25,6 +25,23 @@ double metersPerPixel(double lat, uint8_t z) {
   return 156543.03392 * std::cos(lat * kPi / 180.0) / std::ldexp(1.0, z);
 }
 
+void pixelToLatLon(const PixelPos& p, uint8_t z, double& lat, double& lon) {
+  const double n = 256.0 * std::ldexp(1.0, z);
+  lon = p.x / n * 360.0 - 180.0;
+  lat = std::atan(std::sinh(kPi * (1.0 - 2.0 * p.y / n))) * 180.0 / kPi;
+}
+
+void scaleBar(double metersPerPx, uint16_t maxPx, uint32_t& meters, uint16_t& px) {
+  static const uint32_t kSteps[] = {5,    10,   20,    50,    100,   200,   500,
+                                    1000, 2000, 5000, 10000, 20000, 50000, 100000};
+  meters = kSteps[0];
+  for (uint32_t s : kSteps)
+    if (metersPerPx > 0 && s / metersPerPx <= maxPx) meters = s;
+  double p = metersPerPx > 0 ? meters / metersPerPx : maxPx;
+  if (p > maxPx) p = maxPx;
+  px = (uint16_t)std::lround(p);
+}
+
 uint8_t visibleTiles(const PixelPos& center, uint8_t z, int16_t w, int16_t h, TileRef* out,
                      uint8_t max) {
   const int64_t left = (int64_t)std::floor(center.x) - w / 2;

@@ -8,6 +8,9 @@ struct PixelPos {
 
 PixelPos latLonToPixel(double lat, double lon, uint8_t z);  // lat limitada a ±85.05112878
 double metersPerPixel(double lat, uint8_t z);
+void pixelToLatLon(const PixelPos& p, uint8_t z, double& lat, double& lon);  // inversa
+// Barra de escala: maior comprimento "redondo" (5, 10, 20, 50 m ... 100 km) que cabe em maxPx.
+void scaleBar(double metersPerPx, uint16_t maxPx, uint32_t& meters, uint16_t& px);
 
 struct TileRef {
   uint8_t z;

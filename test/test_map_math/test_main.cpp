@@ -135,6 +135,27 @@ void test_zoom_initial_and_step() {
   TEST_ASSERT_EQUAL_UINT8(17, hi.initial());
 }
 
+void test_pixel_to_latlon_roundtrip() {
+  PixelPos p = latLonToPixel(-23.55052, -46.63331, 15);
+  double lat, lon;
+  pixelToLatLon(p, 15, lat, lon);
+  TEST_ASSERT_DOUBLE_WITHIN(1e-7, -23.55052, lat);
+  TEST_ASSERT_DOUBLE_WITHIN(1e-7, -46.63331, lon);
+}
+
+void test_scale_bar_picks_round_length() {
+  uint32_t m;
+  uint16_t px;
+  scaleBar(4.3794, 80, m, px);  // z15 em São Paulo: 80 px ≈ 350 m
+  TEST_ASSERT_EQUAL_UINT32(200, m);
+  TEST_ASSERT_EQUAL_UINT16(46, px);
+  scaleBar(100.0, 80, m, px);  // 80 px = 8 km
+  TEST_ASSERT_EQUAL_UINT32(5000, m);
+  TEST_ASSERT_EQUAL_UINT16(50, px);
+  scaleBar(0.1, 80, m, px);  // 80 px = 8 m
+  TEST_ASSERT_EQUAL_UINT32(5, m);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_pixel_origin);
@@ -152,5 +173,7 @@ int main() {
   RUN_TEST(test_edge_arrow_right);
   RUN_TEST(test_edge_arrow_down_left);
   RUN_TEST(test_zoom_initial_and_step);
+  RUN_TEST(test_pixel_to_latlon_roundtrip);
+  RUN_TEST(test_scale_bar_picks_round_length);
   return UNITY_END();
 }

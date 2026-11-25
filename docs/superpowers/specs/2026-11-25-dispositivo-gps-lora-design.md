@@ -81,7 +81,10 @@ inofensivo.
 - **A (escolhida):** duas tasks FreeRTOS — *rádio* (core 0: GPS, LoRa,
   protocolo, ACK/reenvio de SOS, POS a cada 30 s, GPX) e *UI* (core 1:
   encoder, TFT, OLED, mapa, áudio, scanner) — mais uma task pequena do IMU
-  acordada pelo INT. Comunicação por filas (pacotes recebidos, pedidos de
+  acordada pelo INT. Etapa 4: o GPX saiu do rádio para uma task *sd*
+  (core 0, prioridade 1). O rádio só decide o ponto e o enfileira; a task
+  de SD grava o arquivo e a trilha em PSRAM, e o rádio nunca espera o SPI.
+  Ver `2026-11-25-etapa4-mapa-gpx-design.md`. Comunicação por filas (pacotes recebidos, pedidos de
   envio, eventos) e struct de estado compartilhada protegida por mutex.
   Escolhida porque decodificar JPG (~100 ms/tile) nunca atrasa SOS/ACK.
 - **B:** loop único com `millis()`. Rejeitada: JPG/SD bloqueiam o loop,
@@ -234,8 +237,10 @@ Hora local, bateria %, satélites, barra de sinal LoRa (RSSI ou idade do
 
 ### Mapa
 
-Tiles `/tiles/{z}/{x}/{y}.jpg` (256x256, slippy map OSM). Centro na minha
-posição; desenha os tiles que cobrem 240x320 (até 4 inteiros + bordas).
+Tiles `/tiles/{z}/{x}/{y}.jpg` (256x256, slippy map OSM, JPEG baseline;
+preparados por `tools/prepare_tiles.py`). Centro na minha posição; desenha
+os tiles que cobrem o viewport 320x240 em paisagem (até 3x2 tiles). A trilha
+da sessão atual é desenhada como linha sobre o mapa.
 Cache LRU em PSRAM de tiles decodificados (RGB565, 128 KB cada; ~24 tiles
 = 3 MB). Marca minha posição e a do amigo (se fora da tela, seta na
 borda). Zoom pelo encoder, limitado aos níveis que existirem no SD.
