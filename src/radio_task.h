@@ -28,6 +28,6 @@ struct RadioEvt {
   bool peerSos;        // PeerSos
 };
 
-void radioStart(const Settings& s);   // cria a task "radio" (core 0, prio 3, stack 6144)
+void radioStart(const Settings& s);   // cria a task "radio" (core 0, prio 3, stack 8192)
 bool radioSend(const RadioCmd& c);    // não bloqueia; false se a fila está cheia
 bool radioNextEvent(RadioEvt& e);     // não bloqueia

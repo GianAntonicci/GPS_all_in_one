@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "geo.h"
 #include "radio_task.h"
 #include "state.h"
 
@@ -35,6 +36,35 @@ void printStatus() {
     Serial.printf("[STATUS] amigo em %.5f, %.5f alt %ld bat %u%% (ha %lu s)\n", s.peerLat,
                   s.peerLon, (long)s.peerAlt, s.peerBat,
                   (unsigned long)((now - s.peerPosMs) / 1000));
+  if (s.peerKnown && s.myPosKnown) {
+    double d = distanceM(s.lat, s.lon, s.peerLat, s.peerLon);
+    double b = bearingDeg(s.lat, s.lon, s.peerLat, s.peerLon);
+    if (s.courseKnown) {
+      Serial.printf("[STATUS] amigo a %.0f m, rumo %.0f graus (%+.0f em relacao ao meu rumo%s)\n",
+                    d, b, relativeBearingDeg(b, s.courseDeg), s.courseStale ? ", antigo" : "");
+    } else {
+      Serial.printf("[STATUS] amigo a %.0f m, rumo %.0f graus\n", d, b);
+    }
+  }
+}
+
+void printGps() {
+  stateLock();
+  SharedState s = state();
+  stateUnlock();
+  Serial.printf("[GPS] fix=%s sats=%u\n", s.gpsFix ? "sim" : "nao", s.sats);
+  if (s.myPosKnown)
+    Serial.printf("[GPS] %s %.5f, %.5f alt %.0f m vel %.1f km/h\n",
+                  s.gpsFix ? "posicao" : "ultima posicao", s.lat, s.lon, s.altM, s.speedKmh);
+  if (s.courseKnown)
+    Serial.printf("[GPS] rumo %.0f graus%s\n", s.courseDeg, s.courseStale ? " (antigo)" : "");
+  if (s.timeValid) {
+    const DateTime& t = s.localTime;
+    Serial.printf("[GPS] %02u/%02u/%04u %02u:%02u:%02u (UTC-3)\n", t.day, t.month, t.year, t.hour,
+                  t.minute, t.second);
+  }
+  Serial.printf("[BAT] %u%% (%lu mV)%s\n", s.batteryPct, (unsigned long)s.batteryMv,
+                s.batteryLow ? " BAIXA" : "");
 }
 
 void send(const RadioCmd& c) {
@@ -57,6 +87,11 @@ void handleLine(char* line) {
     c.lon = lon;
     c.bat = 100;
     send(c);
+  } else if (strcmp(line, "sos") == 0) {
+    c.kind = RadioCmdKind::SosStart;  // lat=lon=0: usa a minha posição
+    send(c);
+  } else if (strcmp(line, "gps") == 0) {
+    printGps();
   } else if (sscanf(line, "sos %lf %lf", &lat, &lon) == 2) {
     c.kind = RadioCmdKind::SosStart;
     c.lat = lat;
@@ -72,7 +107,7 @@ void handleLine(char* line) {
   } else if (strcmp(line, "status") == 0) {
     printStatus();
   } else if (*line) {
-    Serial.println("Comandos: ping | msg <texto> | pos <lat> <lon> | sos <lat> <lon> | cancel | vi | status");
+    Serial.println("Comandos: ping | msg <texto> | pos <lat> <lon> | sos [<lat> <lon>] | cancel | vi | gps | status");
   }
 }
 
