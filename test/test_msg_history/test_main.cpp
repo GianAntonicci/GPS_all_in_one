@@ -86,6 +86,19 @@ void test_time_stored() {
   TEST_ASSERT_EQUAL_STRING("B2", h.at(0).from);
 }
 
+void test_find_by_uid_survives_new_entries() {
+  MsgHistory h;
+  h.addSent(1, "A1", "minha", false, 0, 0);
+  uint32_t uid = h.at(0).uid;
+  h.addReceived("B2", "nova", false, 0, 0);
+  int i = h.find(uid);
+  TEST_ASSERT_EQUAL_INT(1, i);
+  TEST_ASSERT_EQUAL_STRING("minha", h.at(i).text);
+  TEST_ASSERT_NOT_EQUAL(uid, h.at(0).uid);
+  for (int k = 0; k < 20; ++k) h.addReceived("B2", "x", false, 0, 0);
+  TEST_ASSERT_EQUAL_INT(-1, h.find(uid));  // saiu do anel
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_newest_first);
@@ -96,5 +109,6 @@ int main(int, char**) {
   RUN_TEST(test_has_pending);
   RUN_TEST(test_text_truncated_48);
   RUN_TEST(test_time_stored);
+  RUN_TEST(test_find_by_uid_survives_new_entries);
   return UNITY_END();
 }

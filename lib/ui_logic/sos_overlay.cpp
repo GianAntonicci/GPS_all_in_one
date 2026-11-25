@@ -16,8 +16,8 @@ void SosOverlay::requestCountdown(uint32_t now) {
 }
 
 void SosOverlay::sync(SosState mine, bool peerSos, uint32_t) {
-  if (mine == SosState::Sending || mine == SosState::Received || mine == SosState::Seen)
-    pendingStart_ = false;
+  // Só um estado "ativo" confirma o StartSos: um Seen antigo ainda no rádio não conta.
+  if (mine == SosState::Sending || mine == SosState::Received) pendingStart_ = false;
   if (mine == SosState::Seen && mine_ != SosState::Seen) seenOpen_ = true;
   if (mine != SosState::Seen) seenOpen_ = false;
   mine_ = mine;
@@ -42,7 +42,12 @@ uint8_t SosOverlay::countdownLeft(uint32_t now) const {
   return (uint8_t)(10 - el / 1000);
 }
 
-SosAction SosOverlay::onGesture(Gesture g, uint32_t) {
+SosAction SosOverlay::onGesture(Gesture g, uint32_t now) {
+  // Segurar 2 s sobre Visto ou sobre o SOS do amigo também pede um SOS meu.
+  if (g == Gesture::Hold2s && !countdown_ && !mineActive()) {
+    requestCountdown(now);
+    return SosAction::None;
+  }
   switch (top()) {
     case Overlay::PeerSos:
       if (g == Gesture::Click) {

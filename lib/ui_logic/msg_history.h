@@ -6,6 +6,7 @@
 enum class MsgStatus : uint8_t { Received, Pending, Delivered, Failed };
 
 struct MsgEntry {
+  uint32_t uid;  // identificador estável (o índice muda quando chegam mensagens)
   bool mine;
   char from[3];
   char text[49];
@@ -25,6 +26,7 @@ class MsgHistory {
   size_t size() const { return count_; }
   const MsgEntry& at(size_t i) const;  // 0 = mais nova
   bool hasPending() const;
+  int find(uint32_t uid) const;  // índice atual ou -1
 
  private:
   MsgEntry& push();
@@ -32,4 +34,5 @@ class MsgHistory {
   MsgEntry ring_[kMax];
   size_t head_ = 0;  // próxima posição de escrita
   size_t count_ = 0;
+  uint32_t nextUid_ = 1;
 };

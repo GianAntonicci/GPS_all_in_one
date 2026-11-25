@@ -14,6 +14,7 @@ MsgEntry& MsgHistory::push() {
   head_ = (head_ + 1) % kMax;
   if (count_ < kMax) ++count_;
   e = MsgEntry{};
+  e.uid = nextUid_++;
   return e;
 }
 
@@ -54,6 +55,12 @@ void MsgHistory::onDelivery(uint8_t seq, bool delivered) {
       return;
     }
   }
+}
+
+int MsgHistory::find(uint32_t uid) const {
+  for (size_t i = 0; i < count_; ++i)
+    if (at(i).uid == uid) return (int)i;
+  return -1;
 }
 
 bool MsgHistory::hasPending() const {

@@ -124,6 +124,32 @@ void test_btn_click_after_hold_next_press() {
   TEST_ASSERT_EQUAL(Gesture::Click, g);
 }
 
+void test_quad_dropped_transition_resyncs_at_rest() {
+  QuadDecoder q;
+  int sum = 0;
+  sum += feed(q, 0b01);
+  sum += feed(q, 0b10);  // 11 perdido (ISR atrasada): salto inválido
+  sum += feed(q, 0b00);  // chegou no repouso: conta o detent
+  TEST_ASSERT_EQUAL_INT(1, sum);
+  // bounce no repouso não gera passo fantasma
+  sum = 0;
+  for (int i = 0; i < 5; ++i) {
+    sum += feed(q, 0b01);
+    sum += feed(q, 0b00);
+  }
+  TEST_ASSERT_EQUAL_INT(0, sum);
+  // e o próximo detent no sentido contrário não se perde
+  sum = feed(q, 0b10) + feed(q, 0b11) + feed(q, 0b01) + feed(q, 0b00);
+  TEST_ASSERT_EQUAL_INT(-1, sum);
+}
+
+void test_quad_rest_state_from_reset() {
+  QuadDecoder q;
+  q.reset(true, true);  // encoder com pull-up repousa em 11
+  int sum = feed(q, 0b10) + feed(q, 0b00) + feed(q, 0b01) + feed(q, 0b11);
+  TEST_ASSERT_EQUAL_INT(1, sum);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_quad_cw_one_detent);
@@ -138,5 +164,7 @@ int main(int, char**) {
   RUN_TEST(test_btn_hold3s_after_hold2s);
   RUN_TEST(test_btn_no_click_after_hold);
   RUN_TEST(test_btn_click_after_hold_next_press);
+  RUN_TEST(test_quad_dropped_transition_resyncs_at_rest);
+  RUN_TEST(test_quad_rest_state_from_reset);
   return UNITY_END();
 }

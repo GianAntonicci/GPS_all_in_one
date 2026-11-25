@@ -5,14 +5,19 @@
 class QuadDecoder {
  public:
   explicit QuadDecoder(uint8_t stepsPerDetent = 4) : steps_(stepsPerDetent) {}
-  void reset(bool a, bool b) { prev_ = (uint8_t)((a ? 2 : 0) | (b ? 1 : 0)); acc_ = 0; }
+  // Estado inicial = posição de repouso (detent). Chamar com o knob parado.
+  void reset(bool a, bool b) {
+    prev_ = rest_ = (uint8_t)((a ? 2 : 0) | (b ? 1 : 0));
+    acc_ = 0;
+  }
   // Chamado a cada mudança de A/B. Retorna -1, 0 ou +1 detent completado.
-  // Transições inválidas (pulo de 2 estados, bounce) valem 0.
+  // O detent só é contado ao chegar no repouso, e o acumulado zera ali: uma transição
+  // perdida (ISR atrasada) ou bounce não deixa resto que gere passo fantasma depois.
   int8_t update(bool a, bool b);
 
  private:
   uint8_t steps_;
-  uint8_t prev_ = 0;
+  uint8_t prev_ = 0, rest_ = 0;
   int8_t acc_ = 0;
 };
 

@@ -9,15 +9,13 @@ int8_t QuadDecoder::update(bool a, bool b) {
   uint8_t cur = (uint8_t)((a ? 2 : 0) | (b ? 1 : 0));
   acc_ += kQuad[(prev_ << 2) | cur];
   prev_ = cur;
-  if (acc_ >= (int8_t)steps_) {
-    acc_ -= steps_;
-    return 1;
-  }
-  if (acc_ <= -(int8_t)steps_) {
-    acc_ += steps_;
-    return -1;
-  }
-  return 0;
+  // Repouso: o estado inicial; com 2 passos por detent, também o estado oposto.
+  bool rest = cur == rest_ || (steps_ <= 2 && cur == (rest_ ^ 3));
+  if (!rest) return 0;
+  const int8_t half = (int8_t)(steps_ / 2 ? steps_ / 2 : 1);
+  int8_t out = acc_ >= half ? 1 : acc_ <= -half ? -1 : 0;
+  acc_ = 0;
+  return out;
 }
 
 Gesture ButtonGestures::update(bool raw, uint32_t now) {

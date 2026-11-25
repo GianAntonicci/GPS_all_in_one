@@ -176,6 +176,35 @@ void test_wake_event_turns_on() {
   TEST_ASSERT_TRUE(w.screenOn());
 }
 
+void test_stale_seen_does_not_hide_new_sos() {
+  SosOverlay o;
+  o.sync(SosState::Seen, false, 0);  // SOS anterior terminou em Visto
+  o.onGesture(Gesture::Click, 10);   // fecha o overlay Visto
+  o.requestCountdown(100);
+  TEST_ASSERT_EQUAL(SosAction::StartSos, o.tick(10100));
+  o.sync(SosState::Seen, false, 10105);  // rádio ainda não processou o StartSos
+  TEST_ASSERT_EQUAL(Overlay::Sending, o.top());
+  TEST_ASSERT_EQUAL(SosAction::CancelSos, o.onGesture(Gesture::Hold3s, 10200));
+}
+
+void test_hold2s_on_seen_starts_countdown() {
+  SosOverlay o;
+  o.sync(SosState::Received, false, 0);
+  o.sync(SosState::Seen, false, 10);
+  TEST_ASSERT_EQUAL(Overlay::Seen, o.top());
+  o.onGesture(Gesture::Hold2s, 100);
+  TEST_ASSERT_EQUAL(Overlay::Countdown, o.top());
+}
+
+void test_hold2s_on_peer_sos_starts_my_countdown() {
+  SosOverlay o;
+  o.sync(SosState::Idle, true, 0);
+  o.onGesture(Gesture::Hold2s, 100);
+  TEST_ASSERT_EQUAL(Overlay::PeerSos, o.top());
+  TEST_ASSERT_TRUE(o.counting());
+  TEST_ASSERT_TRUE(o.showMineStrip());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_countdown_starts_and_fires_at_10s);
@@ -197,5 +226,8 @@ int main(int, char**) {
   RUN_TEST(test_wake_timeout_30s);
   RUN_TEST(test_wake_keep_on_during_overlay);
   RUN_TEST(test_wake_event_turns_on);
+  RUN_TEST(test_stale_seen_does_not_hide_new_sos);
+  RUN_TEST(test_hold2s_on_seen_starts_countdown);
+  RUN_TEST(test_hold2s_on_peer_sos_starts_my_countdown);
   return UNITY_END();
 }
