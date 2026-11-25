@@ -5,6 +5,7 @@
 #include "geo.h"
 #include "radio_task.h"
 #include "state.h"
+#include "ui.h"
 
 namespace {
 
@@ -26,8 +27,8 @@ void printStatus() {
   SharedState s = state();
   stateUnlock();
   uint32_t now = millis();
-  Serial.printf("[STATUS] lora=%s sos=%s amigoSOS=%s%s\n", s.loraOk ? "ok" : "ERRO",
-                sosName(s.mySos), s.peerSos ? "SIM" : "nao",
+  Serial.printf("[STATUS] lora=%s imu=%s sos=%s amigoSOS=%s%s\n", s.loraOk ? "ok" : "ERRO",
+                s.imuOk ? "ok" : "ERRO", sosName(s.mySos), s.peerSos ? "SIM" : "nao",
                 s.idConflict ? " ID-DUPLICADO" : "");
   if (s.peerRxMs)
     Serial.printf("[STATUS] ultimo pacote do amigo ha %lu s, rssi %s%d\n",
@@ -106,8 +107,11 @@ void handleLine(char* line) {
     send(c);
   } else if (strcmp(line, "status") == 0) {
     printStatus();
+  } else if (strcmp(line, "fall") == 0) {
+    Serial.println("[IMU] simulando queda (contagem SOS)");
+    uiRequestSosCountdown();
   } else if (*line) {
-    Serial.println("Comandos: ping | msg <texto> | pos <lat> <lon> | sos [<lat> <lon>] | cancel | vi | gps | status");
+    Serial.println("Comandos: ping | msg <texto> | pos <lat> <lon> | sos [<lat> <lon>] | cancel | vi | gps | fall | status");
   }
 }
 

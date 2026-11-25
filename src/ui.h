@@ -4,3 +4,4 @@
 
 void uiStart(Settings& s);       // task "ui", core 1, prioridade 2, stack 8192
 void uiRequestSosCountdown();    // thread-safe; usado pela detecção de queda (etapa 5)
+void uiWakeScreen();             // thread-safe; acorda o TFT por movimento sem abrir SOS

@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include "config.h"
 #include "debug_console.h"
+#include "i2c_bus.h"
+#include "imu.h"
 #include "radio_task.h"
 #include "sd_task.h"
 #include "spi_bus.h"
@@ -21,9 +23,11 @@ void setup() {
 
   stateInit();
   spiBusInit();
+  i2cBusInit();
   settingsLoad(gSettings);
   radioStart(gSettings);
   uiStart(gSettings);
+  imuStart();
   sdStart();  // espera o display configurar o SPI antes de montar o SD
 }
 

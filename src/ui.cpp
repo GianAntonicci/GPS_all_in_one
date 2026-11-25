@@ -35,6 +35,7 @@ constexpr uint8_t kMaxStack = 3;
 
 Settings* gSet = nullptr;
 std::atomic<bool> gSosRequest{false};
+std::atomic<bool> gWakeRequest{false};
 
 // ---- Estado da UI (só a task de UI acessa) ----
 Screen gStack[kMaxStack] = {Screen::Menu};
@@ -461,6 +462,10 @@ void uiTask(void*) {
       }
     }
     audioPlay(AudioCues::forGesture(g));
+    if (gWakeRequest.exchange(false)) {
+      gWake.wake(now);
+      gDirty = true;
+    }
     if (gSosRequest.exchange(false)) {
       gOverlay.requestCountdown(now);
       gWake.wake(now);
@@ -540,3 +545,5 @@ void uiStart(Settings& s) {
 }
 
 void uiRequestSosCountdown() { gSosRequest.store(true); }
+
+void uiWakeScreen() { gWakeRequest.store(true); }

@@ -4,6 +4,7 @@
 #include <Wire.h>
 #include <cstring>
 #include "config.h"
+#include "i2c_bus.h"
 
 namespace {
 Adafruit_SSD1306 gOled(128, 32, &Wire, -1);
@@ -47,15 +48,17 @@ void drawLine(const char* s, int16_t y, uint8_t size, bool line1) {
 }  // namespace
 
 bool oledBegin() {
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
+  i2cLock();
   gOk = gOled.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   if (!gOk) {
+    i2cUnlock();
     LOGE("OLED nao respondeu em 0x3C");
     return false;
   }
   gOled.setTextColor(SSD1306_WHITE);
   gOled.clearDisplay();
   gOled.display();
+  i2cUnlock();
   return true;
 }
 
@@ -67,5 +70,7 @@ void oledShow(const char* l1, const char* l2) {
   bool warning = strchr(l2, '#') == nullptr && strchr(l2, '-') == nullptr;
   if (warning && strlen(l2) <= 10) drawLine(l2, 16, 2, false);
   else drawLine(l2, 18, 1, false);
+  i2cLock();
   gOled.display();
+  i2cUnlock();
 }
