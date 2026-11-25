@@ -37,7 +37,7 @@ uint8_t* gFileBuf = nullptr;
 TileLru gLru(kSlots);
 ZoomLevels gZooms;
 bool gScanned = false;
-bool gWasMounted = false;
+uint32_t gSeenGeneration = 0;  // montagem do cartão cujos tiles estão no cache
 uint8_t gZoom = kNoSdZoom;
 bool gZoomChosen = false;
 uint16_t* gDecodeDst = nullptr;  // slot sendo preenchido pelo callback do decoder
@@ -270,9 +270,10 @@ void mapZoom(int8_t detents) {
 
 bool mapDraw(TFT_eSprite& f, const SharedState& s) {
   const bool mounted = sdMounted();
-  if (mounted != gWasMounted) {
-    // Cartão entrou ou saiu (pode ser outro): esquece níveis e tiles.
-    gWasMounted = mounted;
+  const uint32_t gen = sdGeneration();
+  if (gen != gSeenGeneration) {
+    // Cartão remontado (pode ser outro, mesmo com o Mapa fechado): esquece níveis e tiles.
+    gSeenGeneration = gen;
     gScanned = false;
     gZooms.clear();
     gLru.clear();

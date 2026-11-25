@@ -8,6 +8,7 @@
 #include "config.h"
 #include "display.h"
 #include "gpx_format.h"
+#include "sd_probe.h"
 #include "spi_bus.h"
 #include "state.h"
 
@@ -21,6 +22,8 @@ SemaphoreHandle_t gTrailMx = nullptr;
 TrackPt* gTrailMem = nullptr;
 TrackBuffer* gTrail = nullptr;
 std::atomic<bool> gMounted{false};
+std::atomic<uint32_t> gGeneration{0};  // +1 a cada montagem: a UI esquece tiles de outro cartão
+SdProbe gProbe;
 
 File gFile;
 bool gOpen = false;
@@ -46,6 +49,10 @@ bool mount() {
   if (ok && !SD.exists("/tracks")) SD.mkdir("/tracks");
   spiUnlock();
   gMounted = ok;
+  if (ok) {
+    ++gGeneration;
+    gProbe.reset(millis());
+  }
   if (ok) LOGI("SD: montado (%llu MB)", SD.cardSize() / (1024ULL * 1024ULL));
   else LOGW("SD: cartao ausente ou ilegivel");
   return ok;
@@ -115,6 +122,19 @@ void handlePoint(const TrackPoint& p, uint32_t& nextMount) {
   if (ok) ok = appendPoint(p);
   spiUnlock();
   if (!ok) fail(nextMount);
+  else gProbe.reset(millis());
+}
+
+// Sem escrita há 5 s: lê o setor 0 de verdade (cardType/exists usam cache) para notar remoção.
+void probe(uint32_t& nextMount) {
+  static uint8_t sector[512];
+  spiLock();
+  bool ok = SD.readRAW(sector, 0);
+  spiUnlock();
+  if (!ok) {
+    LOGW("SD: cartao nao responde");
+    fail(nextMount);
+  }
 }
 
 void sdTask(void*) {
@@ -125,6 +145,7 @@ void sdTask(void*) {
   for (;;) {
     TrackPoint p;
     if (xQueueReceive(gQ, &p, pdMS_TO_TICKS(1000)) == pdTRUE) handlePoint(p, nextMount);
+    if (gMounted && gProbe.due(millis())) probe(nextMount);
     if (ENABLE_SD && !gMounted && (int32_t)(millis() - nextMount) >= 0) {
       if (!mount()) nextMount = millis() + kRemountMs;
     }
@@ -145,6 +166,7 @@ void sdStart() {
 
 bool trackEnqueue(const TrackPoint& p) { return gQ && xQueueSend(gQ, &p, 0) == pdTRUE; }
 bool sdMounted() { return gMounted; }
+uint32_t sdGeneration() { return gGeneration; }
 void trailLock() { xSemaphoreTake(gTrailMx, portMAX_DELAY); }
 void trailUnlock() { xSemaphoreGive(gTrailMx); }
 

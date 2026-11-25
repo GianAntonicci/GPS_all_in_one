@@ -15,6 +15,7 @@ struct TrackPoint {
 void sdStart();                          // cria a task; ela espera displayReady() para montar
 bool trackEnqueue(const TrackPoint& p);  // não bloqueia; false se a fila está cheia
 bool sdMounted();                        // thread-safe
+uint32_t sdGeneration();                 // muda a cada (re)montagem do cartão
 void trailLock();
 void trailUnlock();
 const TrackBuffer& trail();  // ler só entre trailLock()/trailUnlock()
