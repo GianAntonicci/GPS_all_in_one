@@ -41,6 +41,9 @@ struct SharedState {
   uint32_t batteryMv = 0;
   uint8_t batteryPct = 0;
   bool batteryLow = false;
+
+  // ---- IMU (task "imu") ----
+  bool imuOk = false;
 };
 
 void stateInit();  // cria o mutex; chamar no setup() antes de iniciar tasks

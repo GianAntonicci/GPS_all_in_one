@@ -257,8 +257,11 @@ corte de energia.
 ### IMU
 
 MPU6050 com interrupção de movimento no GPIO 7 → acorda tela. Queda:
-pico > ~3 g seguido de imobilidade por 30 s → contagem de SOS cancelável.
-Limiares em constantes ajustáveis.
+pico ≥ 3 g seguido de assentamento (~1,5 s) e imobilidade por 30 s → contagem
+de SOS cancelável (sempre ativa, sem opção de desligar). Acelerômetro em ±8 g
+com giroscópio em standby; barramento I2C protegido por mutex compartilhado com
+o OLED. Limiares em constantes ajustáveis. Ver
+`2026-11-25-etapa5b-imu-design.md`.
 
 ### Áudio
 
