@@ -38,6 +38,14 @@ class Link {
   int sendPing(uint32_t now);
   void sendPos(double lat, double lon, int32_t alt, uint8_t bat, uint32_t now);
 
+  // SOS em dois níveis (spec): Sending -> Received (ACK) -> Seen (SEEN do amigo).
+  void startSos(double lat, double lon, uint8_t bat, uint32_t now);
+  void updateSosPosition(double lat, double lon, uint8_t bat);
+  void cancelSos(uint32_t now);    // envia SOSOFF até ACK; estado -> Idle
+  void confirmSeen(uint32_t now);  // usuário apertou "Vi": envia SEEN até ACK
+  SosState sosState() const { return sos_; }
+  bool peerSosActive() const { return peerSos_; }
+
   uint32_t lastPeerRxMs() const { return lastPeerRx_; }
   bool hasPeer() const { return hasPeer_; }
 
@@ -48,6 +56,14 @@ class Link {
     uint8_t attempts = 0;
     uint32_t nextMs = 0;
   };
+  static constexpr size_t kSosSeqs = 8;
+
+  void setSos(SosState s);
+  void sendSosNow(uint32_t now);
+  uint32_t sosInterval(uint8_t attempts) const;
+  void startRepeat(Pending& r, PktType t, uint32_t now);
+  void tickRepeat(Pending& r, uint32_t now);
+  void setPeerSos(bool a);
   struct SeenEntry {
     bool used = false;
     char id[3] = {};
@@ -71,8 +87,22 @@ class Link {
   LinkTiming t_;
 
   Pending msg_;
-  SeenEntry seen_[kDedup];
-  size_t seenNext_ = 0;
+  SeenEntry dedup_[kDedup];
+  size_t dedupNext_ = 0;
+
+  // Meu SOS
+  SosState sos_ = SosState::Idle;
+  double sosLat_ = 0, sosLon_ = 0;
+  uint8_t sosBat_ = 0;
+  uint8_t sosAttempts_ = 0;
+  uint32_t sosNextMs_ = 0, sosLastSendMs_ = 0;
+  uint8_t sosSeqs_[kSosSeqs] = {};
+  uint8_t sosSeqCount_ = 0;
+  Pending sosOff_;   // SOSOFF até ACK
+
+  // SOS do amigo
+  bool peerSos_ = false;
+  Pending seenOut_;  // SEEN até ACK (enquanto ativo, SOS do amigo não reacende o alarme)
 
   bool hasPeer_ = false;
   uint32_t lastPeerRx_ = 0;
