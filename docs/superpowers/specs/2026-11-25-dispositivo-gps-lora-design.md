@@ -163,6 +163,37 @@ diferentes. O OLED mostra o canal em uso. O builder deve
 confirmar no datasheet do DX-LR22 o formato de configuração (registradores
 tipo `C0 ...` ou comandos AT) e os valores de taxa/potência.
 
+### DX-LR22 — o que o manual diz (2025-11-25)
+
+Fontes: manual técnico do DX-LR22-900T22D v2.0 e guia UART do irmão
+DX-LR21-900T22S (o manual do LR22 remete a um guia UART com a mesma
+numeração de seções; assumimos o mesmo conjunto AT e confirmamos no
+hardware).
+
+- Configuração por **comandos AT**, terminados em `\r\n`. Entrar e sair
+  do modo AT com `+++` (resposta `Entry AT` / `Exit AT`; ao sair o módulo
+  reinicia). Sucesso termina em `OK`, erro em `ERROR=<n>`; consultas
+  respondem `+CHAVE=valor` (às vezes com espaços, ex. `+LEVEL =2`).
+- **M0/M1:** com `AT+SWITCH0` (padrão) são **saídas do módulo**, em nível
+  baixo. O ESP nunca deve acioná-los: GPIO 41/42 ficam como
+  `INPUT_PULLDOWN` (com SWITCH=1 os pull-downs também mantêm o modo de
+  alta eficiência). O firmware garante `AT+SWITCH0`.
+- **AUX:** nível **alto = ocupado** (TX/RX/troca de modo), baixo = livre.
+  Isso é o contrário dos módulos Ebyte.
+- **Alcance:** `AT+LEVEL0` = SF11, BW 125 kHz, CR 4/8, **336 bit/s**
+  (~8 km em visada direta). Um pacote de 40 bytes leva cerca de 1 s no ar.
+- **Canal:** `AT+CHANNEL<hex>` = 850,15 MHz + n × 1 MHz. Usar **0x47
+  (921,15 MHz)**, dentro de 915–928 MHz e fora do padrão de fábrica 0x41,
+  que é compartilhado por todo mundo (decisão do builder).
+- **RSSI:** `AT+DRSSI1` anexa **1 byte** após cada pacote recebido;
+  dBm = −(255 − byte). Esse byte é sempre ≥ 0x80, então o protocolo
+  precisa ser **ASCII puro (< 0x80)**.
+- `AT+POWE22`, `AT+MODE0` (transparente), `AT+PACKET3` (230 B),
+  `AT+BAUD3` (9600). As alterações só valem depois de reiniciar.
+- **Alimentação (hardware):** 3,3–5,5 V; **≥ 5 V garante os 22 dBm**.
+  Com Li-ion 1S é preciso um boost de 5 V para o módulo, senão o alcance
+  cai. Prever capacitores de 100 µF + 0,1 µF junto ao VCC.
+
 ### GPS
 
 TinyGPSPlus em `Serial1` 9600. Estado: lat, lon, alt, velocidade,
