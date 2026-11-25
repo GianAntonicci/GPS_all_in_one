@@ -1,5 +1,11 @@
 #include <Arduino.h>
 #include "config.h"
+#include "debug_console.h"
+#include "radio_task.h"
+#include "state.h"
+#include "storage.h"
+
+static Settings gSettings;
 
 void setup() {
   Serial.begin(115200);
@@ -9,8 +15,13 @@ void setup() {
   }
   LOGI("Comunicador GPS+LoRa v%s", FW_VERSION);
   LOGI("Flash %u bytes, PSRAM %u bytes", ESP.getFlashChipSize(), ESP.getPsramSize());
+
+  stateInit();
+  settingsLoad(gSettings);
+  radioStart(gSettings);
 }
 
 void loop() {
-  vTaskDelay(1);
+  consolePoll();
+  vTaskDelay(pdMS_TO_TICKS(10));
 }
