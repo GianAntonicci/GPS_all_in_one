@@ -84,3 +84,12 @@ void oledLines(const OledInput& in, char* l1, char* l2, size_t cap) {
   fmtAgeShort(in.peerEver, in.peerAgeMs, age, sizeof age);
   snprintf(l2, cap, "%s %s %s%s", in.myId, bars, age, (in.newMsg && in.blinkPhase) ? " *" : "");
 }
+
+void fmtTrackStatus(char* out, size_t cap, bool sdOk, bool recording, uint32_t points,
+                    bool timeValid, bool fix) {
+  if (!sdOk) snprintf(out, cap, "Trilha: sem cartao");
+  else if (recording) snprintf(out, cap, "Trilha: gravando (%lu pts)", (unsigned long)points);
+  else if (!fix) snprintf(out, cap, "Trilha: aguardando fix");
+  else if (!timeValid) snprintf(out, cap, "Trilha: aguardando hora");
+  else snprintf(out, cap, "Trilha: iniciando");
+}

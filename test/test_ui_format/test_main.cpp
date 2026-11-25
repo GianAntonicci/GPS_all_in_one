@@ -176,6 +176,20 @@ void test_oled_battery_low_blinks() {
   TEST_ASSERT_EQUAL_STRING("12:04  S08      ", l1);
 }
 
+void test_track_status_lines() {
+  char b[40];
+  fmtTrackStatus(b, sizeof b, false, true, 5, true, true);
+  TEST_ASSERT_EQUAL_STRING("Trilha: sem cartao", b);
+  fmtTrackStatus(b, sizeof b, true, true, 42, true, true);
+  TEST_ASSERT_EQUAL_STRING("Trilha: gravando (42 pts)", b);
+  fmtTrackStatus(b, sizeof b, true, false, 0, true, false);
+  TEST_ASSERT_EQUAL_STRING("Trilha: aguardando fix", b);
+  fmtTrackStatus(b, sizeof b, true, false, 0, false, true);
+  TEST_ASSERT_EQUAL_STRING("Trilha: aguardando hora", b);
+  fmtTrackStatus(b, sizeof b, true, false, 0, true, true);
+  TEST_ASSERT_EQUAL_STRING("Trilha: iniciando", b);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_distance_formats);
@@ -191,5 +205,6 @@ int main(int, char**) {
   RUN_TEST(test_oled_my_sos_states);
   RUN_TEST(test_oled_seen_recent);
   RUN_TEST(test_oled_battery_low_blinks);
+  RUN_TEST(test_track_status_lines);
   return UNITY_END();
 }

@@ -85,6 +85,7 @@ void gpsPoll(uint32_t now) {
   if (gGps.date.isValid() && gGps.time.isValid() && gGps.date.year() >= 2024) {
     DateTime utc{gGps.date.year(), gGps.date.month(), gGps.date.day(),
                  gGps.time.hour(), gGps.time.minute(), gGps.time.second()};
+    s.utcTime = utc;
     s.localTime = utcToLocal(utc, kUtcOffsetHours);
     s.timeValid = true;
   }

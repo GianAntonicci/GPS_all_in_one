@@ -2,6 +2,7 @@
 #include "config.h"
 #include "debug_console.h"
 #include "radio_task.h"
+#include "sd_task.h"
 #include "spi_bus.h"
 #include "ui.h"
 #include "state.h"
@@ -23,6 +24,7 @@ void setup() {
   settingsLoad(gSettings);
   radioStart(gSettings);
   uiStart(gSettings);
+  sdStart();  // espera o display configurar o SPI antes de montar o SD
 }
 
 void loop() {

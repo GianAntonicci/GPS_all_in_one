@@ -10,6 +10,9 @@ void fmtAgeLong(bool known, uint32_t ms, char* out, size_t cap);   // "ha 25 s",
 uint8_t signalBars(bool hasRssi, int16_t rssi);                    // 0..4
 uint8_t brightnessPctFromRaw(uint8_t raw);  // múltiplo de 10 mais próximo, mínimo 10
 uint8_t brightnessRawFromPct(uint8_t pct);
+// Linha da trilha na tela GPS ("Trilha: gravando (N pts)", "sem cartao", ...).
+void fmtTrackStatus(char* out, size_t cap, bool sdOk, bool recording, uint32_t points,
+                    bool timeValid, bool fix);
 
 struct OledInput {
   bool timeValid;

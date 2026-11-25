@@ -6,6 +6,7 @@
 #include "config.h"
 #include "debug_console.h"
 #include "display.h"
+#include "map_view.h"
 #include "input.h"
 #include "input_logic.h"
 #include "keyboard.h"
@@ -53,6 +54,7 @@ uint32_t gBannerUntil = 0;
 uint32_t gSeenAt = 0;
 bool gSeenEver = false;
 bool gDirty = true;
+bool gMapPending = false;  // a tela Mapa ainda tem tile para carregar
 bool gScreenWasOn = true;
 
 // Configurações em edição
@@ -224,6 +226,14 @@ void onSettingsInput(int8_t d, Gesture g, uint32_t now) {
 
 void onScreenInput(int8_t d, Gesture g, uint32_t now) {
   Screen s = top();
+  if (s == Screen::Map) {  // tela cheia, sem cursor: giro = zoom, clique = voltar
+    if (d) {
+      mapZoom(d);
+      gDirty = true;
+    }
+    if (g == Gesture::Click) pop();
+    return;
+  }
   if (s == Screen::Settings) {
     onSettingsInput(d, g, now);
     return;
@@ -348,6 +358,7 @@ void onRadioEvent(const RadioEvt& e, const SharedState& s, uint32_t now) {
 void draw(const SharedState& s, uint32_t now) {
   TFT_eSprite& f = frame();
   Overlay o = gOverlay.top();
+  gMapPending = false;  // só a tela Mapa visível pede quadros extras para carregar tiles
   if (o != Overlay::None) {
     ui::drawOverlay(f, o, s, gOverlay.countdownLeft(now), now);
     if (gOverlay.showMineStrip()) {
@@ -375,7 +386,7 @@ void draw(const SharedState& s, uint32_t now) {
         gSetView.idConflict = s.idConflict;
         ui::drawSettings(f, gSetView, c);
         break;
-      case Screen::Map: ui::drawSoon(f, "Mapa", "Em breve (etapa 4)"); break;
+      case Screen::Map: gMapPending = mapDraw(f, s); break;
       case Screen::Scanner: ui::drawSoon(f, "Scanner", "Em breve (etapa 5)"); break;
     }
   }
@@ -412,6 +423,7 @@ void updateOled(const SharedState& s, uint32_t now, bool blink) {
 
 void uiTask(void*) {
   if (!displayBegin()) LOGE("UI: display indisponivel");
+  mapInit();
   oledBegin();
   inputBegin();
   gSetView.brightness = brightnessPctFromRaw(gSet->brightness);
@@ -481,6 +493,7 @@ void uiTask(void*) {
       gLastCountdown = gOverlay.countdownLeft(now);
       gDirty = true;
     }
+    if (top() == Screen::Map && gMapPending) gDirty = true;  // carrega o próximo tile
     if (now - lastRefresh >= kRefreshMs) {
       gDirty = true;
       lastRefresh = now;

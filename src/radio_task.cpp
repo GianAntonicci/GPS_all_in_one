@@ -9,6 +9,8 @@
 #include "gps.h"
 #include "gps_logic.h"
 #include "lora.h"
+#include "sd_task.h"
+#include "track_logic.h"
 #include "state.h"
 
 namespace {
@@ -169,6 +171,27 @@ void setLoraOk(bool ok) {
   stateUnlock();
 }
 
+// Decide o ponto da trilha e só enfileira: o rádio nunca toca o SD nem o SPI.
+void recordTrack(TrackPolicy& policy, uint32_t now) {
+  TrackPoint p{};
+  stateLock();
+  const SharedState& s = state();
+  bool fix = s.gpsFix;
+  p.lat = s.lat;
+  p.lon = s.lon;
+  p.alt = s.altM;
+  if (s.timeValid) {
+    p.utc = s.utcTime;
+    p.local = s.localTime;
+  }
+  stateUnlock();
+  bool seg = false;
+  if (!policy.due(now, fix, p.lat, p.lon, seg)) return;
+  p.newSegment = seg;
+  if (trackEnqueue(p)) policy.accepted(now, p.lat, p.lon);
+  else LOGW("Trilha: fila cheia, ponto descartado");
+}
+
 void radioTask(void*) {
   LoraStatus st = loraBegin();
   setLoraOk(st == LoraStatus::Ok);
@@ -182,6 +205,7 @@ void radioTask(void*) {
   gpsBegin();
   batteryBegin();
   PosScheduler posSched(esp_random);  // POS a cada 30 s + 0-3 s com fix
+  TrackPolicy trackPolicy;  // ponto da trilha a cada 10 s ou 20 m
   uint32_t lastSosUpdate = 0;
   constexpr uint32_t kSosUpdateMs = 5000;
 
@@ -212,6 +236,7 @@ void radioTask(void*) {
     }
     gpsPoll(millis());
     batteryPoll(millis());
+    recordTrack(trackPolicy, millis());
     {
       MyPos m = myPos();
       SosState ss = link.sosState();
