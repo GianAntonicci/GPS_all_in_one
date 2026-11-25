@@ -18,6 +18,7 @@ class SosOverlay {
   bool showMineStrip() const;    // SOS do amigo em cima com meu SOS/contagem ativo
   uint8_t countdownLeft(uint32_t now) const;
   bool active() const { return top() != Overlay::None; }
+  bool counting() const { return countdown_; }
 
  private:
   bool mineActive() const;
