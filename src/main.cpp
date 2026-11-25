@@ -23,5 +23,7 @@ void setup() {
 
 void loop() {
   consolePoll();
+  RadioEvt e;
+  while (radioNextEvent(e)) consolePrintEvent(e);  // até a UI assumir os eventos
   vTaskDelay(pdMS_TO_TICKS(10));
 }

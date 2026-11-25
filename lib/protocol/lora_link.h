@@ -52,6 +52,7 @@ class Link {
   void cancelSos(uint32_t now);    // envia SOSOFF até ACK; estado -> Idle
   void confirmSeen(uint32_t now);  // usuário apertou "Vi": envia SEEN até ACK
   SosState sosState() const { return sos_; }
+  uint8_t sosAttempts() const { return sosAttempts_; }
   bool peerSosActive() const { return peerSos_; }
 
   uint32_t lastPeerRxMs() const { return lastPeerRx_; }
