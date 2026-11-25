@@ -43,7 +43,10 @@ WakePolicy gWake;
 ButtonGestures gButton;
 MsgHistory gHistory;
 KeyboardModel gKeyboard;
-size_t gDetail = 0;
+uint32_t gDetailUid = 0;  // mensagem aberta no Detalhe (estável quando chegam outras)
+RadioCmdKind gRetry[4];   // comandos de SOS que a fila do rádio recusou
+uint8_t gRetryN = 0;
+uint8_t gLastCountdown = 0;
 bool gNewMsg = false;
 char gBanner[64] = "";
 uint32_t gBannerUntil = 0;
@@ -62,7 +65,9 @@ uint8_t itemCount(Screen s) {
     case Screen::Menu: return 6;
     case Screen::Messages: return (uint8_t)(2 + ui::kQuickCount + gHistory.size());
     case Screen::Detail: {
-      const MsgEntry& e = gHistory.at(gDetail);
+      int i = gHistory.find(gDetailUid);
+      if (i < 0) return 1;
+      const MsgEntry& e = gHistory.at(i);
       return (e.mine && e.status == MsgStatus::Failed) ? 2 : 1;
     }
     case Screen::Keyboard: return (uint8_t)(1 + gKeyboard.keyCount());
@@ -117,10 +122,31 @@ void sendMessage(const char* text, uint32_t now) {
   if (!radioSend(c)) banner("Radio ocupado, tente de novo", now, 2000);
 }
 
-void sendCmd(RadioCmdKind k) {
+bool trySendCmd(RadioCmdKind k) {
   RadioCmd c{};
   c.kind = k;  // SosStart com lat=lon=0: o rádio usa a minha posição
-  radioSend(c);
+  return radioSend(c);
+}
+
+// Comandos de SOS nunca se perdem: se a fila estiver cheia, tenta de novo a cada volta.
+void sendCmd(RadioCmdKind k) {
+  if (gRetryN == 0 && trySendCmd(k)) return;
+  if (gRetryN < 4) gRetry[gRetryN++] = k;
+  else LOGE("UI: fila de reenvio de comandos SOS cheia");
+}
+
+void flushRetries() {
+  while (gRetryN && trySendCmd(gRetry[0])) {
+    for (uint8_t i = 1; i < gRetryN; ++i) gRetry[i - 1] = gRetry[i];
+    --gRetryN;
+  }
+}
+
+// Nova entrada no histórico: o cursor acompanha a mensagem que estava destacada.
+void onHistoryAdded() {
+  if (top() != Screen::Messages) return;
+  gCursor.setCount(itemCount(Screen::Messages));
+  if (gCursor.index() >= 2 + ui::kQuickCount) gCursor.move(1);
 }
 
 void applyBrightness(bool on) { displaySetBrightness(on ? gSetView.brightness : 0); }
@@ -233,17 +259,16 @@ void onScreenInput(int8_t d, Gesture g, uint32_t now) {
       } else if (i < 2 + ui::kQuickCount) {
         sendMessage(ui::kQuick[i - 2], now);
       } else {
-        gDetail = i - 2 - ui::kQuickCount;
+        gDetailUid = gHistory.at(i - 2 - ui::kQuickCount).uid;
         push(Screen::Detail);
       }
       break;
-    case Screen::Detail:
-      if (i == 0) pop();
-      else {
-        sendMessage(gHistory.at(gDetail).text, now);  // reenviar
-        pop();
-      }
+    case Screen::Detail: {
+      int k = gHistory.find(gDetailUid);
+      if (i != 0 && k >= 0) sendMessage(gHistory.at(k).text, now);  // reenviar
+      pop();
       break;
+    }
     case Screen::Keyboard:
       if (i == 0) pop();
       else if (gKeyboard.press(i - 1)) {
@@ -285,6 +310,7 @@ void onRadioEvent(const RadioEvt& e, const SharedState& s, uint32_t now) {
       if (e.pkt.type == PktType::MSG) {
         gHistory.addReceived(e.pkt.id, e.pkt.text, s.timeValid, s.localTime.hour,
                              s.localTime.minute);
+        onHistoryAdded();
         char b[64];
         snprintf(b, sizeof b, "%s: %s", e.pkt.id, e.pkt.text);
         banner(b, now);
@@ -295,6 +321,7 @@ void onRadioEvent(const RadioEvt& e, const SharedState& s, uint32_t now) {
     case RadioEvtKind::MsgQueued:
       gHistory.addSent(e.seq, gSet->id, e.pkt.text, s.timeValid, s.localTime.hour,
                        s.localTime.minute);
+      onHistoryAdded();
       break;
     case RadioEvtKind::MsgBusy:
       banner("Aguarde... mensagem anterior pendente", now, 2000);
@@ -333,8 +360,13 @@ void draw(const SharedState& s, uint32_t now) {
       case Screen::Friend: ui::drawFriend(f, s, now); break;
       case Screen::Messages: ui::drawMessages(f, gHistory, c, now); break;
       case Screen::Detail: {
-        const MsgEntry& e = gHistory.at(gDetail);
-        ui::drawDetail(f, e, c, e.mine && e.status == MsgStatus::Failed);
+        int k = gHistory.find(gDetailUid);
+        if (k < 0) {
+          ui::drawSoon(f, "Mensagem", "saiu do historico");
+        } else {
+          const MsgEntry& e = gHistory.at(k);
+          ui::drawDetail(f, e, c, e.mine && e.status == MsgStatus::Failed);
+        }
         break;
       }
       case Screen::Keyboard: ui::drawKeyboard(f, gKeyboard, c); break;
@@ -347,7 +379,9 @@ void draw(const SharedState& s, uint32_t now) {
       case Screen::Scanner: ui::drawSoon(f, "Scanner", "Em breve (etapa 5)"); break;
     }
   }
-  if (gBanner[0] && (int32_t)(now - gBannerUntil) < 0) ui::drawBanner(f, gBanner);
+  // Banner nunca cobre um overlay de SOS.
+  if (o == Overlay::None && gBanner[0] && (int32_t)(now - gBannerUntil) < 0)
+    ui::drawBanner(f, gBanner);
   displayPush();
 }
 
@@ -419,6 +453,7 @@ void uiTask(void*) {
     }
     for (SosAction a = gOverlay.tick(now); a != SosAction::None; a = gOverlay.tick(now))
       handleAction(a, now);
+    flushRetries();
 
     // Tela acesa/apagada
     gWake.tick(now, gOverlay.active());
@@ -441,7 +476,12 @@ void uiTask(void*) {
       gBanner[0] = 0;
       gDirty = true;
     }
-    if (gOverlay.top() == Overlay::Countdown || now - lastRefresh >= kRefreshMs) {
+    // Contagem: redesenha só quando o número muda (o quadro inteiro custa ~30 ms de SPI).
+    if (gOverlay.counting() && gOverlay.countdownLeft(now) != gLastCountdown) {
+      gLastCountdown = gOverlay.countdownLeft(now);
+      gDirty = true;
+    }
+    if (now - lastRefresh >= kRefreshMs) {
       gDirty = true;
       lastRefresh = now;
     }

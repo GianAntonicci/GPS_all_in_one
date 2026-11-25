@@ -27,6 +27,21 @@ constexpr uint16_t kGreen = rgb(0x2E, 0x6B, 0x2E);
 constexpr uint16_t kRed = rgb(0xE0, 0x30, 0x30);
 constexpr int16_t kRowH = 30;
 
+// Corta `s` com "..." até caber em `maxW` pixels na fonte atual.
+void fitWidth(TFT_eSprite& f, char* s, size_t cap, int16_t maxW) {
+  if (f.textWidth(s) <= maxW) return;
+  size_t n = strlen(s);
+  while (n > 3) {
+    s[--n] = 0;
+    char tmp[72];
+    int m = snprintf(tmp, sizeof tmp, "%s...", s);
+    if (m > 0 && (size_t)m < cap && f.textWidth(tmp) <= maxW) {
+      memcpy(s, tmp, (size_t)m + 1);
+      return;
+    }
+  }
+}
+
 // Linha de lista; sel = fundo amarelo.
 void row(TFT_eSprite& f, int16_t y, const char* text, bool sel, uint16_t fg = kText,
          int16_t h = kRowH) {
@@ -297,16 +312,17 @@ void drawMessages(TFT_eSprite& f, const MsgHistory& h, uint8_t cursor, uint32_t)
       char hm[8] = "";
       if (e.hasTime) snprintf(hm, sizeof hm, "%02u:%02u ", e.hour, e.minute);
       snprintf(b, sizeof b, "%s%s: %s", hm, e.from, e.text);
-      // corta para caber (Font2 ~ 7 px/caractere em 300 px, reservando a marca)
-      size_t maxc = 40 - strlen(mark);
-      if (strlen(b) > maxc) {
-        b[maxc - 3] = '.';
-        b[maxc - 2] = '.';
-        b[maxc - 1] = '.';
-        b[maxc] = 0;
-      }
-      strncat(b, mark, sizeof b - strlen(b) - 1);
+      // Corta pela largura real (pixels) e desenha a marca de estado alinhada à direita.
+      f.setTextFont(2);
+      f.setTextSize(1);
+      const int16_t markW = mark[0] ? f.textWidth(mark) + 6 : 0;
+      fitWidth(f, b, sizeof b, SCREEN_W - 20 - markW);
       row(f, y, b, cursor == item, e.mine ? kText : rgb(0x88, 0xBB, 0xDD));
+      if (mark[0]) {
+        f.setTextColor(cursor == item ? TFT_BLACK : kText);
+        f.setTextDatum(MR_DATUM);
+        f.drawString(mark, SCREEN_W - 8, y + kRowH / 2);
+      }
     }
   }
 }
@@ -326,18 +342,28 @@ void drawDetail(TFT_eSprite& f, const MsgEntry& e, uint8_t cursor, bool canResen
   if (e.hasTime) snprintf(b, sizeof b, "%s  %02u:%02u  %s", e.from, e.hour, e.minute, st);
   else snprintf(b, sizeof b, "%s  %s", e.from, st);
   f.drawString(b, 10, 36);
-  // Texto inteiro em linhas de até 22 caracteres (Font4 não cabe 48; usa Font2 x2? -> Font4)
+  // Texto inteiro quebrado pela largura real em Font4.
   f.setTextFont(4);
   f.setTextColor(TFT_WHITE);
-  const size_t perLine = 20;
-  size_t n = strlen(e.text);
+  const char* p = e.text;
   int16_t y = 62;
-  for (size_t i = 0; i < n && y < 190; i += perLine, y += 30) {
-    char line[perLine + 1];
-    size_t k = n - i < perLine ? n - i : perLine;
-    memcpy(line, e.text + i, k);
+  while (*p && y < 190) {
+    char line[50];
+    size_t k = 0;
+    while (p[k] && k < sizeof line - 1) {
+      line[k] = p[k];
+      line[k + 1] = 0;
+      if (f.textWidth(line) > SCREEN_W - 20) {
+        line[k] = 0;
+        break;
+      }
+      ++k;
+    }
+    if (k == 0) k = 1;  // garante progresso
     line[k] = 0;
     f.drawString(line, 10, y);
+    p += k;
+    y += 30;
   }
   if (canResend) row(f, 205, "Reenviar", cursor == 1);
 }
@@ -361,7 +387,7 @@ void drawKeyboard(TFT_eSprite& f, const KeyboardModel& kb, uint8_t cursor) {
   snprintf(shown, sizeof shown, "%s_", n > fit ? t + (n - fit) : t);
   f.drawString(shown, 14, 47);
   // Grade 10x5
-  const int16_t gx = 8, gy = 70, kw = 30, kh = 30, gap = 3;
+  const int16_t gx = 8, gy = 70, kw = 28, kh = 30, gap = 3;  // 8 + 10*31 - 3 = 315 px
   for (size_t i = 0; i < kb.keyCount(); ++i) {
     const Key& k = kb.key(i);
     int16_t x = gx + k.col * (kw + gap), y = gy + k.row * (kh + gap);
