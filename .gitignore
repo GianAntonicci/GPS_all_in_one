@@ -1,3 +1,4 @@
 .pio
 .vscode/
 .superpowers/
+__pycache__/
