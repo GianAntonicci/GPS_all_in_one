@@ -26,6 +26,11 @@ class ToneSequencer {
  public:
   void play(Pattern p, uint32_t now);  // menor prioridade que o atual: ignorado
   void stop(Pattern p);                // só se p for o que está tocando
+  // Alarme por nível: chamado a cada bloco com o estado desejado (nunca depende de um "parar").
+  void setAlarm(bool wanted, uint32_t now) {
+    if (wanted) play(Pattern::PeerAlarm, now);
+    else stop(Pattern::PeerAlarm);
+  }
   Tone current(uint32_t now);          // padrão de uma vez que acabou vira None
   Pattern playing() const { return p_; }
 

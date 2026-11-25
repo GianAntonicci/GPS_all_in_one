@@ -17,6 +17,7 @@ struct CueOut {
   Pattern play[2];
   uint8_t n;
   bool stopAlarm;
+  bool alarm;  // nível: o alarme deve estar tocando agora
 };
 
 class AudioCues {

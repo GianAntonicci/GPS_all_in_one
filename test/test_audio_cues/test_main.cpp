@@ -70,6 +70,15 @@ void test_gestures() {
   TEST_ASSERT_TRUE(AudioCues::forGesture(Gesture::None) == Pattern::None);
 }
 
+void test_alarm_level_reported_every_call() {
+  AudioCues c;
+  TEST_ASSERT_FALSE(c.update({Overlay::None, false, 0, SosState::Idle}).alarm);
+  TEST_ASSERT_TRUE(c.update({Overlay::PeerSos, false, 0, SosState::Idle}).alarm);
+  TEST_ASSERT_TRUE(c.update({Overlay::PeerSos, false, 0, SosState::Idle}).alarm);
+  TEST_ASSERT_FALSE(c.update({Overlay::None, false, 0, SosState::Idle}).alarm);
+  TEST_ASSERT_FALSE(c.update({Overlay::None, false, 0, SosState::Idle}).alarm);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_nothing_when_idle);
@@ -80,5 +89,6 @@ int main() {
   RUN_TEST(test_sos_received_and_seen_once);
   RUN_TEST(test_alarm_and_tick_together);
   RUN_TEST(test_gestures);
+  RUN_TEST(test_alarm_level_reported_every_call);
   return UNITY_END();
 }

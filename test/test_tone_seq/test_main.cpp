@@ -103,6 +103,24 @@ void test_priorities() {
   TEST_ASSERT_EQUAL_UINT8(255, patternPriority(Pattern::None));
 }
 
+void test_set_alarm_is_level_triggered() {
+  ToneSequencer s;
+  s.setAlarm(false, 0);  // repetir "não quero" é inofensivo
+  TEST_ASSERT_TRUE(s.playing() == Pattern::None);
+  s.setAlarm(true, 0);
+  s.setAlarm(true, 300);  // reafirmar não reinicia a fase
+  TEST_ASSERT_EQUAL_UINT16(1400, s.current(300).freqHz);
+  s.setAlarm(false, 400);
+  TEST_ASSERT_TRUE(s.playing() == Pattern::None);
+}
+
+void test_set_alarm_false_keeps_other_patterns() {
+  ToneSequencer s;
+  s.play(Pattern::Message, 0);
+  s.setAlarm(false, 10);
+  TEST_ASSERT_TRUE(s.playing() == Pattern::Message);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_idle_is_silent);
@@ -115,5 +133,7 @@ int main() {
   RUN_TEST(test_stop_only_matching);
   RUN_TEST(test_loud_patterns_ignore_volume);
   RUN_TEST(test_priorities);
+  RUN_TEST(test_set_alarm_is_level_triggered);
+  RUN_TEST(test_set_alarm_false_keeps_other_patterns);
   return UNITY_END();
 }

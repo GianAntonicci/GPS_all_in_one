@@ -479,17 +479,9 @@ void uiTask(void*) {
       // Sons do SOS: roda com a tela acesa ou apagada.
       CueOut o = gCues.update({gOverlay.top(), gOverlay.counting(), gOverlay.countdownLeft(now),
                                s.mySos});
-      static uint32_t lastAlarm = 0;
-      for (uint8_t i = 0; i < o.n; ++i) {
-        // O alarme é reafirmado a cada iteração; manda no máximo 2x/s para não lotar a fila.
-        if (o.play[i] == Pattern::PeerAlarm) {
-          if (lastAlarm && now - lastAlarm < 500) continue;
-          lastAlarm = now ? now : 1;
-        }
-        audioPlay(o.play[i]);
-      }
-      if (o.stopAlarm) lastAlarm = 0;
-      if (o.stopAlarm) audioStop(Pattern::PeerAlarm);
+      audioSetAlarm(o.alarm);  // nível: a task de áudio liga/desliga o alarme sozinha
+      for (uint8_t i = 0; i < o.n; ++i)
+        if (o.play[i] != Pattern::PeerAlarm) audioPlay(o.play[i]);
     }
     flushRetries();
 

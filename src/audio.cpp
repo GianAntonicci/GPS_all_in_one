@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <driver/i2s.h>
+#include <atomic>
 #include <cmath>
 #include "config.h"
 
@@ -26,6 +27,7 @@ int16_t gSine[kTable];
 ToneSequencer gSeq;
 uint8_t gVolume = 70;
 bool gRunning = false;
+std::atomic<bool> gAlarmWanted{false};  // estado, não comando: não se perde na fila
 
 void apply(const Cmd& c, uint32_t now) {
   switch (c.kind) {
@@ -77,15 +79,16 @@ void audioTask(void*) {
   for (;;) {
     Cmd c;
     if (!gRunning) {
-      // Parado: dorme até chegar um pedido.
-      if (xQueueReceive(gQ, &c, portMAX_DELAY) != pdTRUE) continue;
-      apply(c, millis());
+      // Parado: dorme até chegar um pedido (acorda a cada 100 ms para ver o alarme).
+      if (xQueueReceive(gQ, &c, pdMS_TO_TICKS(100)) == pdTRUE) apply(c, millis());
+      gSeq.setAlarm(gAlarmWanted, millis());
       if (gSeq.playing() == Pattern::None) continue;
       i2s_start(kPort);
       gRunning = true;
       silentSince = 0;
     }
     while (xQueueReceive(gQ, &c, 0) == pdTRUE) apply(c, millis());
+    gSeq.setAlarm(gAlarmWanted, millis());
 
     const uint32_t now = millis();
     Tone t = gSeq.current(now);
@@ -136,4 +139,5 @@ void audioPlay(Pattern p) {
   if (p != Pattern::None) send({CmdKind::Play, p, 0});
 }
 void audioStop(Pattern p) { send({CmdKind::Stop, p, 0}); }
+void audioSetAlarm(bool wanted) { gAlarmWanted = wanted; }
 void audioSetVolume(uint8_t pct) { send({CmdKind::Volume, Pattern::None, pct}); }

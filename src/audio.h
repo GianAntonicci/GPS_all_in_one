@@ -8,3 +8,4 @@ void audioBegin(uint8_t volumePct);
 void audioPlay(Pattern p);
 void audioStop(Pattern p);
 void audioSetVolume(uint8_t pct);
+void audioSetAlarm(bool wanted);  // nível, chamado a cada iteração da UI
