@@ -17,6 +17,8 @@ struct SharedState {
   SosState mySos = SosState::Idle;
   bool peerSos = false;
   bool idConflict = false;  // outro aparelho usando o mesmo ID: enlace não funciona
+  char peerId[3] = "";      // ID do amigo (último pacote válido)
+  uint8_t sosAttempts = 0;  // tentativas do meu SOS atual
 
   // ---- Meu GPS ----
   bool gpsFix = false;      // fix atual válido (idade < 3 s)

@@ -111,7 +111,23 @@ void handleLine(char* line) {
   }
 }
 
-void printEvent(const RadioEvt& e) {
+}  // namespace
+
+void consolePoll() {
+  while (Serial.available()) {
+    int ch = Serial.read();
+    if (ch == '\r') continue;
+    if (ch == '\n') {
+      gLine[gLen] = 0;
+      handleLine(gLine);
+      gLen = 0;
+    } else if (gLen + 1 < sizeof gLine) {
+      gLine[gLen++] = (char)ch;
+    }
+  }
+}
+
+void consolePrintEvent(const RadioEvt& e) {
   switch (e.kind) {
     case RadioEvtKind::Packet: {
       const Packet& p = e.pkt;
@@ -136,6 +152,12 @@ void printEvent(const RadioEvt& e) {
     case RadioEvtKind::MySos:
       Serial.printf("[SOS] meu: %s\n", sosName(e.sos));
       break;
+    case RadioEvtKind::MsgQueued:
+      Serial.printf("[TX] MSG seq %u na fila: %s\n", e.seq, e.pkt.text);
+      break;
+    case RadioEvtKind::MsgBusy:
+      Serial.println("[TX] aguarde: mensagem anterior ainda pendente");
+      break;
     case RadioEvtKind::IdConflict:
       Serial.println("[ERRO] outro aparelho usa o MESMO ID: as mensagens nao vao funcionar");
       break;
@@ -143,22 +165,4 @@ void printEvent(const RadioEvt& e) {
       Serial.println(e.peerSos ? "[SOS] AMIGO PEDIU SOCORRO (digite 'vi')" : "[SOS] alarme do amigo encerrado");
       break;
   }
-}
-
-}  // namespace
-
-void consolePoll() {
-  while (Serial.available()) {
-    int ch = Serial.read();
-    if (ch == '\r') continue;
-    if (ch == '\n') {
-      gLine[gLen] = 0;
-      handleLine(gLine);
-      gLen = 0;
-    } else if (gLen + 1 < sizeof gLine) {
-      gLine[gLen++] = (char)ch;
-    }
-  }
-  RadioEvt e;
-  while (radioNextEvent(e)) printEvent(e);
 }

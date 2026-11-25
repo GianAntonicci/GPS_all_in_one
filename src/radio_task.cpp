@@ -45,6 +45,9 @@ class RadioSink : public LinkSink {
 
   void onPacket(const Packet& p, const Frame& f) override {
     LOGD("LoRa RX %s (rssi %d)", f.line, f.hasRssi ? f.rssi : 0);
+    stateLock();
+    memcpy(state().peerId, p.id, sizeof state().peerId);
+    stateUnlock();
     if (p.type == PktType::POS || p.type == PktType::SOS) {
       stateLock();
       SharedState& s = state();
@@ -117,7 +120,16 @@ void handleCmd(Link& link, const RadioCmd& c, uint32_t now) {
   switch (c.kind) {
     case RadioCmdKind::Msg: {
       int seq = link.sendMsg(c.text, now);
-      if (seq < 0) LOGW("Radio: MSG anterior ainda pendente");
+      RadioEvt e{};
+      if (seq < 0) {
+        LOGW("Radio: MSG anterior ainda pendente");
+        e.kind = RadioEvtKind::MsgBusy;
+      } else {
+        e.kind = RadioEvtKind::MsgQueued;
+        e.seq = (uint8_t)seq;
+        protoSanitize(c.text, e.pkt.text, sizeof e.pkt.text);  // o texto que de fato foi ao ar
+      }
+      pushEvt(e);
       break;
     }
     case RadioCmdKind::Ping:
@@ -213,6 +225,9 @@ void radioTask(void*) {
       }
     }
     link.tick(millis());
+    stateLock();
+    state().sosAttempts = link.sosAttempts();
+    stateUnlock();
     RadioCmd c;
     while (xQueueReceive(gCmdQ, &c, 0) == pdTRUE) handleCmd(link, c, millis());
     vTaskDelay(pdMS_TO_TICKS(5));

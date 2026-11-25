@@ -2,6 +2,8 @@
 #include "config.h"
 #include "debug_console.h"
 #include "radio_task.h"
+#include "spi_bus.h"
+#include "ui.h"
 #include "state.h"
 #include "storage.h"
 
@@ -17,8 +19,10 @@ void setup() {
   LOGI("Flash %u bytes, PSRAM %u bytes", ESP.getFlashChipSize(), ESP.getPsramSize());
 
   stateInit();
+  spiBusInit();
   settingsLoad(gSettings);
   radioStart(gSettings);
+  uiStart(gSettings);
 }
 
 void loop() {
