@@ -19,9 +19,24 @@ void pushEvt(const RadioEvt& e) {
 
 class RadioSink : public LinkSink {
  public:
-  void sendFrame(const char* data, size_t len) override {
+  uint32_t sendFrame(const char* data, size_t len) override {
     LOGD("LoRa TX %.*s", (int)(len ? len - 1 : 0), data);
+    const uint32_t t0 = millis();
     loraWrite(data, len);
+    return millis() - t0;
+  }
+
+  void onIdConflict() override {
+    stateLock();
+    bool first = !state().idConflict;
+    state().idConflict = true;
+    stateUnlock();
+    if (first) {
+      LOGE("Outro aparelho usa o mesmo ID '%s': mude o ID em Configuracoes", gSettings.id);
+      RadioEvt e{};
+      e.kind = RadioEvtKind::IdConflict;
+      pushEvt(e);
+    }
   }
 
   void onPacket(const Packet& p, const Frame& f) override {
@@ -102,11 +117,18 @@ void handleCmd(Link& link, const RadioCmd& c, uint32_t now) {
   }
 }
 
-void radioTask(void*) {
-  bool ok = loraBegin();
+constexpr uint32_t kLoraRetryMs = 30000;
+
+void setLoraOk(bool ok) {
   stateLock();
   state().loraOk = ok;
   stateUnlock();
+}
+
+void radioTask(void*) {
+  LoraStatus st = loraBegin();
+  setLoraOk(st == LoraStatus::Ok);
+  uint32_t lastTry = millis();
 
   Framer framer;
   RadioSink sink;
@@ -114,11 +136,18 @@ void radioTask(void*) {
   Link link(sink, gSettings.id, (uint8_t)(esp_random() & 0xFF), esp_random);
 
   for (;;) {
-    uint32_t now = millis();
-    loraPoll(framer, now);
-    framer.tick(now);
+    if (st == LoraStatus::NoResponse && millis() - lastTry >= kLoraRetryMs) {
+      // Módulo não respondeu ou ficou em modo AT: tenta configurar de novo.
+      st = loraBegin();
+      setLoraOk(st == LoraStatus::Ok);
+      lastTry = millis();
+    }
+    // millis() é relido a cada passo: escritas podem bloquear esperando o AUX.
+    loraPoll(framer, millis());
+    framer.tick(millis());
     Frame f;
     while (framer.pop(f)) {
+      const uint32_t now = millis();
       link.onFrame(f, now);
       // Link só marca lastPeerRxMs = now para frames válidos do amigo.
       if (link.hasPeer() && link.lastPeerRxMs() == now) {
@@ -131,9 +160,9 @@ void radioTask(void*) {
         stateUnlock();
       }
     }
-    link.tick(now);
+    link.tick(millis());
     RadioCmd c;
-    while (xQueueReceive(gCmdQ, &c, 0) == pdTRUE) handleCmd(link, c, now);
+    while (xQueueReceive(gCmdQ, &c, 0) == pdTRUE) handleCmd(link, c, millis());
     vTaskDelay(pdMS_TO_TICKS(5));
   }
 }

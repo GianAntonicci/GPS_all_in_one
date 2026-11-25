@@ -15,7 +15,7 @@ struct RadioCmd {
   uint8_t bat;
 };
 
-enum class RadioEvtKind : uint8_t { Packet, Delivery, MySos, PeerSos };
+enum class RadioEvtKind : uint8_t { Packet, Delivery, MySos, PeerSos, IdConflict };
 
 struct RadioEvt {
   RadioEvtKind kind;

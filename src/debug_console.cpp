@@ -25,8 +25,9 @@ void printStatus() {
   SharedState s = state();
   stateUnlock();
   uint32_t now = millis();
-  Serial.printf("[STATUS] lora=%s sos=%s amigoSOS=%s\n", s.loraOk ? "ok" : "ERRO", sosName(s.mySos),
-                s.peerSos ? "SIM" : "nao");
+  Serial.printf("[STATUS] lora=%s sos=%s amigoSOS=%s%s\n", s.loraOk ? "ok" : "ERRO",
+                sosName(s.mySos), s.peerSos ? "SIM" : "nao",
+                s.idConflict ? " ID-DUPLICADO" : "");
   if (s.peerRxMs)
     Serial.printf("[STATUS] ultimo pacote do amigo ha %lu s, rssi %s%d\n",
                   (unsigned long)((now - s.peerRxMs) / 1000), s.hasRssi ? "" : "? ", s.rssi);
@@ -99,6 +100,9 @@ void printEvent(const RadioEvt& e) {
       break;
     case RadioEvtKind::MySos:
       Serial.printf("[SOS] meu: %s\n", sosName(e.sos));
+      break;
+    case RadioEvtKind::IdConflict:
+      Serial.println("[ERRO] outro aparelho usa o MESMO ID: as mensagens nao vao funcionar");
       break;
     case RadioEvtKind::PeerSos:
       Serial.println(e.peerSos ? "[SOS] AMIGO PEDIU SOCORRO (digite 'vi')" : "[SOS] alarme do amigo encerrado");

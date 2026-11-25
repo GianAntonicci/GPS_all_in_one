@@ -4,6 +4,7 @@
 #include <Preferences.h>
 #include <esp_mac.h>
 #include "config.h"
+#include "protocol.h"
 
 namespace {
 const char* kNs = "cfg";
@@ -18,7 +19,7 @@ bool validId(const String& id) {
 void defaultId(char out[3]) {
   uint8_t mac[6] = {};
   esp_efuse_mac_get_default(mac);
-  snprintf(out, 3, "%02X", mac[5]);
+  protoIdFromMac(mac, out);  // hash do MAC inteiro: menos chance de os dois terem o mesmo ID
 }
 }  // namespace
 

@@ -15,6 +15,7 @@ struct SharedState {
   int16_t rssi = 0;
   SosState mySos = SosState::Idle;
   bool peerSos = false;
+  bool idConflict = false;  // outro aparelho usando o mesmo ID: enlace não funciona
 };
 
 void stateInit();  // cria o mutex; chamar no setup() antes de iniciar tasks

@@ -104,7 +104,7 @@ void dumpHelp() {
 
 }  // namespace
 
-bool loraBegin() {
+LoraStatus loraBegin() {
   // Com AT+SWITCH0, M0/M1 são saídas do módulo: o ESP nunca os aciona.
   pinMode(PIN_LORA_M0, INPUT_PULLDOWN);
   pinMode(PIN_LORA_M1, INPUT_PULLDOWN);
@@ -115,7 +115,7 @@ bool loraBegin() {
   if (!waitAuxLow(2000)) LOGW("LoRa: AUX continua alto apos 2 s");
   if (!enterAt()) {
     LOGE("LoRa sem resposta AT: seguindo em modo transparente com a config atual");
-    return false;
+    return LoraStatus::NoResponse;
   }
 
   AtSetting desired[8];
@@ -135,12 +135,22 @@ bool loraBegin() {
   }
   dumpHelp();
 
-  if (toggleAt() != 0) LOGW("LoRa: sem 'Exit AT'");
+  // Sair do modo AT é obrigatório: preso nele, todo frame vira comando e nada vai ao ar.
+  bool exited = false;
+  for (int i = 0; i < 3 && !exited; ++i) {
+    int r = toggleAt();
+    if (r == 0) exited = true;
+    // r == 1: tinha saído e "+++" entrou de novo -> tenta outra vez; r == -1: sem resposta.
+  }
+  if (!exited) {
+    LOGE("LoRa: nao saiu do modo AT");
+    return LoraStatus::NoResponse;
+  }
   vTaskDelay(pdMS_TO_TICKS(300));  // módulo reinicia ao sair do modo AT
   waitAuxLow(3000);
   drainInput();
   LOGI("LoRa pronto (config %s)", ok ? "ok" : "com erros");
-  return ok;
+  return ok ? LoraStatus::Ok : LoraStatus::ConfigError;
 }
 
 void loraPoll(Framer& f, uint32_t now) {
@@ -153,5 +163,9 @@ bool loraWrite(const char* d, size_t n) {
     return false;
   }
   Serial2.write((const uint8_t*)d, n);
+  // Espera a UART terminar de sair e dá tempo ao módulo de subir o AUX; sem isso,
+  // dois frames seguidos podem ser juntados num pacote só.
+  Serial2.flush();
+  vTaskDelay(pdMS_TO_TICKS(5));
   return true;
 }
