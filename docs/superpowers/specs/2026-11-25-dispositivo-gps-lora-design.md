@@ -115,11 +115,12 @@ no `platformio.ini`; com 0 viram no-op.
 ### SPI compartilhado
 
 TFT, SD e CC1101 no mesmo FSPI. Um mutex global (`spiLock()/spiUnlock()`)
-envolve todo acesso; TFT_eSPI com `SUPPORT_TRANSACTIONS`. O driver SmartRC
-chama `SPI.begin()` por conta própria — inicializá-lo com `setSpiPin()` com
-os mesmos pinos e garantir que não reconfigure o barramento depois do boot
-(se necessário, encapsular/patch local em `lib/`). CC1101 colocado em sleep
-(`SIDLE`+`SPWD`) fora da tela do scanner.
+envolve todo acesso; TFT_eSPI com `SUPPORT_TRANSACTIONS`. Etapa 5c: em vez da
+lib SmartRC (que chama `SPI.begin()`/`SPI.end()` a cada registrador), o CC1101
+usa driver mínimo próprio somente-RX (`src/cc1101`) com `SPI.beginTransaction`
+sob `spiLock()` e timeout em MISO. CC1101 colocado em sleep (`SIDLE`+`SPWD`)
+fora da tela do scanner, com tela apagada ou durante overlay de SOS. Ver
+`2026-11-25-etapa5c-scanner-design.md`.
 
 ### Protocolo LoRa (texto, curto)
 

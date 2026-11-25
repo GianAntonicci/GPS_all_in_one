@@ -4,6 +4,7 @@
 #include <cstdint>
 #include "keyboard.h"
 #include "msg_history.h"
+#include "scanner_model.h"
 #include "sos_overlay.h"
 #include "state.h"
 
@@ -20,6 +21,7 @@ extern const char* const kQuick[kQuickCount];
 void drawMenu(TFT_eSprite& f, uint8_t sel);
 void drawFriend(TFT_eSprite& f, const SharedState& s, uint32_t now);
 void drawGps(TFT_eSprite& f, const SharedState& s);
+void drawScanner(TFT_eSprite& f, const ScannerModel& m, bool hwOk);
 void drawSoon(TFT_eSprite& f, const char* title, const char* msg);
 // cursor: 0 = Voltar, 1 = Escrever, 2..7 = rápidas, 8.. = histórico
 void drawMessages(TFT_eSprite& f, const MsgHistory& h, uint8_t cursor, uint32_t now);
