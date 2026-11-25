@@ -20,6 +20,7 @@ class FallDetector {
  public:
   explicit FallDetector(const FallConfig& cfg = {});
   void onMotionWake(uint32_t now);
+  void reset();  // aborta suspeita em andamento (ex.: falha de leitura I2C)
   FallEvent update(float axG, float ayG, float azG, uint32_t now);
   FallState state() const { return state_; }
   bool wantsSampling() const { return sampling_; }

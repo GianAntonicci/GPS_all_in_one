@@ -155,6 +155,21 @@ void test_millis_wraparound() {
   TEST_ASSERT_TRUE(ev == FallEvent::SosCountdown);
 }
 
+void test_reset_clears_active_fall_state() {
+  FallDetector d;
+  d.onMotionWake(0);
+  d.update(0.0f, 0.0f, 3.5f, 0);
+  d.update(0.0f, 0.0f, 1.0f, 1500);
+  TEST_ASSERT_TRUE(d.state() == FallState::StillWait);
+  TEST_ASSERT_TRUE(d.wantsSampling());
+
+  // Falha de leitura I2C deve abortar qualquer suspeita em andamento e parar amostragem.
+  d.reset();
+  TEST_ASSERT_TRUE(d.state() == FallState::Idle);
+  TEST_ASSERT_FALSE(d.wantsSampling());
+  TEST_ASSERT_TRUE(d.update(0.0f, 0.0f, 1.0f, 31500) == FallEvent::None);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_starts_idle_and_sleeps_after_quiet);
@@ -165,5 +180,6 @@ int main() {
   RUN_TEST(test_sustained_movement_cancels_fall);
   RUN_TEST(test_cooldown_blocks_immediate_retrigger);
   RUN_TEST(test_millis_wraparound);
+  RUN_TEST(test_reset_clears_active_fall_state);
   return UNITY_END();
 }

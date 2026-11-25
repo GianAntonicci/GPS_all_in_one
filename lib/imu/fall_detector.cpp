@@ -4,6 +4,13 @@
 
 FallDetector::FallDetector(const FallConfig& cfg) : cfg_(cfg) {}
 
+void FallDetector::reset() {
+  state_ = FallState::Idle;
+  sampling_ = false;
+  hasPrev_ = false;
+  moving_ = false;
+}
+
 void FallDetector::onMotionWake(uint32_t now) {
   if (state_ == FallState::Cooldown) {
     if ((uint32_t)(now - stateSince_) < cfg_.cooldownMs) {
