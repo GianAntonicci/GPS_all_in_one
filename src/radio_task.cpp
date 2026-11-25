@@ -3,7 +3,11 @@
 #include <Arduino.h>
 #include <esp_system.h>
 #include "config.h"
+#include "battery.h"
 #include "framer.h"
+#include "geo.h"
+#include "gps.h"
+#include "gps_logic.h"
 #include "lora.h"
 #include "state.h"
 
@@ -44,12 +48,14 @@ class RadioSink : public LinkSink {
     if (p.type == PktType::POS || p.type == PktType::SOS) {
       stateLock();
       SharedState& s = state();
-      s.peerKnown = true;
-      s.peerLat = p.lat;
-      s.peerLon = p.lon;
-      if (p.type == PktType::POS) s.peerAlt = p.alt;
       s.peerBat = p.bat;
-      s.peerPosMs = millis();
+      if (posKnown(p.lat, p.lon)) {  // 0,0 = amigo sem posição: não mover o marcador
+        s.peerKnown = true;
+        s.peerLat = p.lat;
+        s.peerLon = p.lon;
+        if (p.type == PktType::POS) s.peerAlt = p.alt;
+        s.peerPosMs = millis();
+      }
       stateUnlock();
     }
     RadioEvt e{};
@@ -89,6 +95,24 @@ class RadioSink : public LinkSink {
   }
 };
 
+struct MyPos {
+  bool known, fix;
+  double lat, lon;
+  int32_t alt;
+  uint8_t bat;
+};
+
+MyPos myPos() {
+  stateLock();
+  const SharedState& s = state();
+  MyPos m{s.myPosKnown, s.gpsFix, s.lat, s.lon, (int32_t)s.altM, s.batteryPct};
+  stateUnlock();
+  if (!m.known) m.lat = m.lon = 0;  // convenção do protocolo: posição desconhecida
+  return m;
+}
+
+bool sosManual = false;  // SOS iniciado com coordenadas digitadas: não sobrescrever
+
 void handleCmd(Link& link, const RadioCmd& c, uint32_t now) {
   switch (c.kind) {
     case RadioCmdKind::Msg: {
@@ -100,11 +124,19 @@ void handleCmd(Link& link, const RadioCmd& c, uint32_t now) {
       if (link.sendPing(now) < 0) LOGW("Radio: MSG/PING anterior ainda pendente");
       break;
     case RadioCmdKind::Pos:
-      link.sendPos(c.lat, c.lon, c.alt, c.bat, now);
+      link.sendPos(c.lat, c.lon, c.alt, myPos().bat, now);
       break;
-    case RadioCmdKind::SosStart:
-      link.startSos(c.lat, c.lon, c.bat, now);
+    case RadioCmdKind::SosStart: {
+      sosManual = posKnown(c.lat, c.lon);
+      // lat=lon=0 no comando = usar a minha posição (atual ou última conhecida).
+      MyPos m = myPos();
+      if (posKnown(c.lat, c.lon)) {
+        link.startSos(c.lat, c.lon, m.bat, now);
+      } else {
+        link.startSos(m.lat, m.lon, m.bat, now);
+      }
       break;
+    }
     case RadioCmdKind::SosCancel:
       link.cancelSos(now);
       break;
@@ -135,6 +167,12 @@ void radioTask(void*) {
   // Seq inicial aleatória: após reiniciar, o amigo não confunde pacotes novos com duplicatas.
   Link link(sink, gSettings.id, (uint8_t)(esp_random() & 0xFF), esp_random);
 
+  gpsBegin();
+  batteryBegin();
+  PosScheduler posSched(esp_random);  // POS a cada 30 s + 0-3 s com fix
+  uint32_t lastSosUpdate = 0;
+  constexpr uint32_t kSosUpdateMs = 5000;
+
   for (;;) {
     if (st == LoraStatus::NoResponse && millis() - lastTry >= kLoraRetryMs) {
       // Módulo não respondeu ou ficou em modo AT: tenta configurar de novo.
@@ -160,6 +198,20 @@ void radioTask(void*) {
         stateUnlock();
       }
     }
+    gpsPoll(millis());
+    batteryPoll(millis());
+    {
+      MyPos m = myPos();
+      SosState ss = link.sosState();
+      bool sosActive = ss == SosState::Sending || ss == SosState::Received;
+      // Durante o SOS a posição já vai no próprio SOS: POS extra só gastaria ar e colidiria.
+      if (posSched.due(millis(), m.fix) && !sosActive)
+        link.sendPos(m.lat, m.lon, m.alt, m.bat, millis());
+      if (sosActive && !sosManual && m.known && millis() - lastSosUpdate >= kSosUpdateMs) {
+        link.updateSosPosition(m.lat, m.lon, m.bat);
+        lastSosUpdate = millis();
+      }
+    }
     link.tick(millis());
     RadioCmd c;
     while (xQueueReceive(gCmdQ, &c, 0) == pdTRUE) handleCmd(link, c, millis());
@@ -173,7 +225,7 @@ void radioStart(const Settings& s) {
   gSettings = s;
   gCmdQ = xQueueCreate(8, sizeof(RadioCmd));
   gEvtQ = xQueueCreate(16, sizeof(RadioEvt));
-  xTaskCreatePinnedToCore(radioTask, "radio", 6144, nullptr, 3, nullptr, 0);
+  xTaskCreatePinnedToCore(radioTask, "radio", 8192, nullptr, 3, nullptr, 0);
 }
 
 bool radioSend(const RadioCmd& c) { return gCmdQ && xQueueSend(gCmdQ, &c, 0) == pdTRUE; }

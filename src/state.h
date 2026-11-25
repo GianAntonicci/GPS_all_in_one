@@ -1,6 +1,7 @@
 #pragma once
 // Estado compartilhado entre as tasks. Sempre acessar entre stateLock()/stateUnlock().
 #include <cstdint>
+#include "gps_logic.h"
 #include "lora_link.h"
 
 struct SharedState {
@@ -16,6 +17,22 @@ struct SharedState {
   SosState mySos = SosState::Idle;
   bool peerSos = false;
   bool idConflict = false;  // outro aparelho usando o mesmo ID: enlace não funciona
+
+  // ---- Meu GPS ----
+  bool gpsFix = false;      // fix atual válido (idade < 3 s)
+  bool myPosKnown = false;  // lat/lon abaixo valem (fix atual ou última posição salva)
+  double lat = 0, lon = 0;
+  float altM = 0, speedKmh = 0;
+  uint8_t sats = 0;
+  double courseDeg = 0;
+  bool courseKnown = false, courseStale = true;
+  bool timeValid = false;
+  DateTime localTime{};     // UTC-3
+
+  // ---- Bateria ----
+  uint32_t batteryMv = 0;
+  uint8_t batteryPct = 0;
+  bool batteryLow = false;
 };
 
 void stateInit();  // cria o mutex; chamar no setup() antes de iniciar tasks
