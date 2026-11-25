@@ -131,7 +131,7 @@ Formato: `$<TIPO>,<ID>,<SEQ>,<campos...>*<CK>\n`
     (~1 m), alt em m inteiro.
   - `PING,<id>,<seq>` / `ACK,<id>,<seq>,<seqConfirmado>`.
   - `SOS,<id>,<seq>,<lat>,<lon>,<bat%>` — ver "SOS em dois níveis".
-  - `SEEN,<id>,<seq>` — confirmação humana do SOS (o usuário apertou "Vi").
+  - `SEEN,<id>,<seq>,<seqDoSos>` — confirmação humana do SOS (o usuário apertou "Vi"); só vale para um SOS do episódio atual.
   - `SOSOFF,<id>,<seq>` — remetente cancelou o SOS (para o alarme do outro).
 - MSG, PING, SOS, SEEN e SOSOFF pedem ACK. MSG: até 3 tentativas, depois
   marcada "não entregue". Duplicatas (mesmo ID+SEQ recente) são confirmadas
@@ -147,6 +147,13 @@ Formato: `$<TIPO>,<ID>,<SEQ>,<campos...>*<CK>\n`
 4. Remetente pode cancelar a qualquer momento → envia `SOSOFF`.
 5. Após "VISTO", o POS normal a cada 30 s continua informando a posição.
 O receptor atualiza a posição do amigo tanto por POS quanto por SOS.
+
+Tempos (revisados após a revisão de código, considerando o airtime em SF11):
+timeout de ACK de MSG/PING 7 s; jitter de SOS/SEEN/SOSOFF de 0–5 s e atraso
+inicial aleatório de 0–2 s, para que dois SOS simultâneos não colidam sempre;
+depois de "Vi", SOS em trânsito não reacende o alarme por 40 s. Um frame com o
+meu próprio ID indica outro aparelho com o mesmo ID (o módulo não recebe o
+próprio TX) e gera um aviso. O ID padrão é um hash do MAC inteiro (base 36).
 - Pacotes próprios (mesmo ID) ignorados. Checksum inválido → descartado.
 - Envio respeita AUX (só escreve com AUX alto) e espaçamento mínimo entre
   pacotes para não estourar o buffer do módulo.

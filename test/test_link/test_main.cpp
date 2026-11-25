@@ -25,15 +25,15 @@ void test_msg_retries_same_seq_then_fails() {
   FakeSink sa;
   Link a(sa, "A1", 0, rand0);
   int s = a.sendMsg("oi", 0);
-  a.tick(3999);
+  a.tick(6999);
   TEST_ASSERT_EQUAL(1, sa.sent.size());
-  a.tick(4000);
+  a.tick(7000);
   TEST_ASSERT_EQUAL(2, sa.sent.size());
   TEST_ASSERT_EQUAL_UINT8(s, sa.sent[1].seq);
-  a.tick(8000);
+  a.tick(14000);
   TEST_ASSERT_EQUAL(3, sa.sent.size());
   TEST_ASSERT_EQUAL(0, sa.deliveries.size());
-  a.tick(12000);
+  a.tick(21000);
   TEST_ASSERT_EQUAL(1, sa.deliveries.size());
   TEST_ASSERT_EQUAL(Delivery::Failed, sa.deliveries[0].second);
   a.tick(30000);
@@ -46,11 +46,11 @@ void test_lost_ack_duplicate_acked_not_redelivered() {
   a.sendMsg("oi", 0);
   deliver(sa, b, 0);
   drop(sb);  // ACK perdido
-  a.tick(4000);  // reenvio
-  deliver(sa, b, 4000);
+  a.tick(7000);  // reenvio
+  deliver(sa, b, 7000);
   TEST_ASSERT_EQUAL(2, sb.countSent(PktType::ACK));
   TEST_ASSERT_EQUAL(1, sb.rx.size());
-  deliver(sb, a, 4000);
+  deliver(sb, a, 7000);
   TEST_ASSERT_EQUAL(1, sa.deliveries.size());
   TEST_ASSERT_EQUAL(Delivery::Delivered, sa.deliveries[0].second);
 }
@@ -71,14 +71,27 @@ void test_dedup_expires() {
   TEST_ASSERT_EQUAL(2, sb.rx.size());
 }
 
-void test_own_frames_ignored() {
+void test_own_id_frame_reports_conflict() {
+  // O módulo não recebe o próprio TX: frame com meu ID = outro aparelho com o mesmo ID.
   FakeSink sa, sa2;
   Link a(sa, "A1", 0, rand0), a2(sa2, "A1", 100, rand0);
   a2.sendPing(0);
   deliver(sa2, a, 0);
+  TEST_ASSERT_EQUAL(1, sa.idConflicts);
   TEST_ASSERT_EQUAL(0, sa.rx.size());
   TEST_ASSERT_EQUAL(0, sa.sent.size());
   TEST_ASSERT_FALSE(a.hasPeer());
+}
+
+void test_retry_timer_starts_after_blocking_write() {
+  FakeSink sa;
+  sa.blockMs = 2500;  // AUX ocupado: a escrita só saiu 2,5 s depois
+  Link a(sa, "A1", 0, rand0);
+  a.sendMsg("oi", 0);
+  a.tick(9499);
+  TEST_ASSERT_EQUAL(1, sa.sent.size());
+  a.tick(9500);
+  TEST_ASSERT_EQUAL(2, sa.sent.size());
 }
 
 void test_late_ack_ignored() {
@@ -86,15 +99,15 @@ void test_late_ack_ignored() {
   Link a(sa, "A1", 0, rand0), b(sb, "B2", 0, rand0);
   a.sendMsg("oi", 0);
   drop(sa);
-  a.tick(4000);
+  a.tick(7000);
   drop(sa);
-  a.tick(8000);
+  a.tick(14000);
   // a 3ª tentativa chega, mas o ACK só volta depois da falha
-  deliver(sa, b, 8000);
-  a.tick(12000);
+  deliver(sa, b, 14000);
+  a.tick(21000);
   TEST_ASSERT_EQUAL(1, sa.deliveries.size());
   TEST_ASSERT_EQUAL(Delivery::Failed, sa.deliveries[0].second);
-  deliver(sb, a, 12500);
+  deliver(sb, a, 21500);
   TEST_ASSERT_EQUAL(1, sa.deliveries.size());
 }
 
@@ -129,9 +142,9 @@ void test_jitter_applied() {
   FakeSink sa;
   Link a(sa, "A1", 0, rand500);
   a.sendPing(0);
-  a.tick(4000);
+  a.tick(7000);
   TEST_ASSERT_EQUAL(1, sa.sent.size());
-  a.tick(4500);
+  a.tick(7500);
   TEST_ASSERT_EQUAL(2, sa.sent.size());
 }
 
@@ -161,7 +174,8 @@ int main(int, char**) {
   RUN_TEST(test_msg_retries_same_seq_then_fails);
   RUN_TEST(test_lost_ack_duplicate_acked_not_redelivered);
   RUN_TEST(test_dedup_expires);
-  RUN_TEST(test_own_frames_ignored);
+  RUN_TEST(test_own_id_frame_reports_conflict);
+  RUN_TEST(test_retry_timer_starts_after_blocking_write);
   RUN_TEST(test_late_ack_ignored);
   RUN_TEST(test_second_msg_while_pending_rejected);
   RUN_TEST(test_pos_no_ack);

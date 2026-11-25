@@ -22,20 +22,22 @@ Packet Link::make(PktType t) {
   return p;
 }
 
-void Link::transmit(const Packet& p) {
+uint32_t Link::transmit(const Packet& p) {
   char buf[FRAME_MAX];
   size_t n = protoEncode(p, buf, sizeof buf);
-  if (n) sink_.sendFrame(buf, n);
+  return n ? sink_.sendFrame(buf, n) : 0;
 }
 
 uint32_t Link::jitter() { return t_.jitterMaxMs ? rand_() % (t_.jitterMaxMs + 1) : 0; }
+
+uint32_t Link::sosJitter() { return t_.sosJitterMaxMs ? rand_() % (t_.sosJitterMaxMs + 1) : 0; }
 
 int Link::startReliable(Packet p, uint32_t now) {
   msg_.active = true;
   msg_.pkt = p;
   msg_.attempts = 1;
-  msg_.nextMs = now + t_.ackTimeoutMs + jitter();
-  transmit(p);
+  uint32_t blocked = transmit(p);
+  msg_.nextMs = now + blocked + t_.ackTimeoutMs + jitter();
   return p.seq;
 }
 
@@ -69,7 +71,7 @@ void Link::handleAck(uint8_t ackSeq) {
     for (uint8_t i = 0; i < sosSeqCount_; ++i) {
       if (sosSeqs_[i] == ackSeq) {
         setSos(SosState::Received);
-        sosNextMs_ = sosLastSendMs_ + t_.sosSlowMs + jitter();
+        sosNextMs_ = sosLastSendMs_ + t_.sosSlowMs + sosJitter();
         break;
       }
     }
@@ -106,25 +108,26 @@ void Link::sendSosNow(uint32_t now) {
     sosSeqs_[kSosSeqs - 1] = p.seq;
   }
   if (sosAttempts_ < 255) ++sosAttempts_;
-  sosLastSendMs_ = now;
+  uint32_t blocked = transmit(p);
+  sosLastSendMs_ = now + blocked;
   uint32_t iv = (sos_ == SosState::Received) ? t_.sosSlowMs : sosInterval(sosAttempts_);
-  sosNextMs_ = now + iv + jitter();
-  transmit(p);
+  sosNextMs_ = sosLastSendMs_ + iv + sosJitter();
 }
 
 void Link::startRepeat(Pending& r, PktType t, uint32_t now) {
   r.active = true;
   r.pkt = make(t);
+  if (t == PktType::SEEN) r.pkt.ackSeq = peerSosSeq_;
   r.attempts = 1;
-  r.nextMs = now + sosInterval(1) + jitter();
-  transmit(r.pkt);
+  uint32_t blocked = transmit(r.pkt);
+  r.nextMs = now + blocked + sosInterval(1) + sosJitter();
 }
 
 void Link::tickRepeat(Pending& r, uint32_t now) {
   if (!r.active || !reached(now, r.nextMs)) return;
   if (r.attempts < 255) ++r.attempts;
-  r.nextMs = now + sosInterval(r.attempts) + jitter();
-  transmit(r.pkt);
+  uint32_t blocked = transmit(r.pkt);
+  r.nextMs = now + blocked + sosInterval(r.attempts) + sosJitter();
 }
 
 void Link::startSos(double lat, double lon, uint8_t bat, uint32_t now) {
@@ -135,7 +138,12 @@ void Link::startSos(double lat, double lon, uint8_t bat, uint32_t now) {
   sosAttempts_ = 0;
   sosSeqCount_ = 0;
   setSos(SosState::Sending);
-  sendSosNow(now);
+  uint32_t delay = t_.sosStartDelayMaxMs ? rand_() % (t_.sosStartDelayMaxMs + 1) : 0;
+  if (delay == 0) {
+    sendSosNow(now);
+  } else {
+    sosNextMs_ = now + delay;  // tick() envia
+  }
 }
 
 void Link::updateSosPosition(double lat, double lon, uint8_t bat) {
@@ -153,6 +161,7 @@ void Link::cancelSos(uint32_t now) {
 void Link::confirmSeen(uint32_t now) {
   if (!peerSos_) return;
   setPeerSos(false);
+  seenAtMs_ = now;
   startRepeat(seenOut_, PktType::SEEN, now);
 }
 
@@ -175,7 +184,11 @@ bool Link::isDuplicate(const Packet& p, uint32_t now) {
 void Link::onFrame(const Frame& f, uint32_t now) {
   Packet p{};
   if (!protoDecode(f.line, f.len, p)) return;
-  if (strcmp(p.id, myId_) == 0) return;
+  if (strcmp(p.id, myId_) == 0) {
+    // O módulo não recebe o próprio TX: é outro aparelho com o mesmo ID.
+    sink_.onIdConflict();
+    return;
+  }
   hasPeer_ = true;
   lastPeerRx_ = now;
 
@@ -191,16 +204,31 @@ void Link::onFrame(const Frame& f, uint32_t now) {
   if (isDuplicate(p, now)) return;
   sink_.onPacket(p, f);
   switch (p.type) {
-    case PktType::SOS:
-      // Enquanto meu SEEN não foi confirmado, SOS em trânsito não reacende o alarme.
-      if (!seenOut_.active) setPeerSos(true);
+    case PktType::SOS: {
+      // Logo após "Vi", SOS ainda em trânsito não reacende o alarme; depois disso é
+      // emergência nova (mesmo que o ACK do meu SEEN tenha se perdido).
+      bool muted = seenOut_.active && !reached(now, seenAtMs_ + t_.seenMuteMs);
+      if (!muted) {
+        peerSosSeq_ = p.seq;
+        if (!peerSos_) seenOut_.active = false;
+        setPeerSos(true);
+      }
       break;
+    }
     case PktType::SOSOFF:
       seenOut_.active = false;
       setPeerSos(false);
       break;
     case PktType::SEEN:
-      if (sos_ == SosState::Sending || sos_ == SosState::Received) setSos(SosState::Seen);
+      // Só vale se confirma um SOS deste episódio (não um SEEN atrasado de um episódio antigo).
+      if (sos_ == SosState::Sending || sos_ == SosState::Received) {
+        for (uint8_t i = 0; i < sosSeqCount_; ++i) {
+          if (sosSeqs_[i] == p.ackSeq) {
+            setSos(SosState::Seen);
+            break;
+          }
+        }
+      }
       break;
     default:
       break;

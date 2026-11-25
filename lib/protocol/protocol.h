@@ -20,7 +20,7 @@ struct Packet {
   double lat, lon;              // POS, SOS
   int32_t alt;                  // POS (m)
   uint8_t bat;                  // POS, SOS (%)
-  uint8_t ackSeq;               // ACK
+  uint8_t ackSeq;               // ACK: seq confirmado; SEEN: seq do SOS que foi visto
 };
 
 uint8_t protoChecksum(const char* s, size_t n);
@@ -38,3 +38,6 @@ void protoSanitize(const char* in, char* out, size_t cap);
 bool protoNeedsAck(PktType t);
 
 const char* protoTypeName(PktType t);
+
+// ID padrão de 2 caracteres [0-9A-Z] derivado do MAC inteiro (hash), para reduzir colisões.
+void protoIdFromMac(const uint8_t mac[6], char out[3]);

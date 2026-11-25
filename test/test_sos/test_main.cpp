@@ -1,7 +1,7 @@
 #include <unity.h>
 #include "../link_harness.h"
 
-void setUp() {}
+void setUp() { randValue() = 0; }
 void tearDown() {}
 
 void test_sos_resends_10s_then_30s() {
@@ -197,6 +197,75 @@ void test_restart_sos_cancels_pending_sosoff() {
   TEST_ASSERT_EQUAL(1, sa.countSent(PktType::SOSOFF));
 }
 
+void test_sos_start_delay_random() {
+  // Dois aparelhos disparando juntos (queda no mesmo acidente) não podem colidir sempre.
+  FakeSink sa;
+  randValue() = 1500;
+  Link a(sa, "A1", 0, randVar);
+  a.startSos(1, 2, 3, 0);
+  TEST_ASSERT_EQUAL(SosState::Sending, a.sosState());
+  TEST_ASSERT_EQUAL(0, sa.countSent(PktType::SOS));
+  a.tick(1499);
+  TEST_ASSERT_EQUAL(0, sa.countSent(PktType::SOS));
+  a.tick(1500);
+  TEST_ASSERT_EQUAL(1, sa.countSent(PktType::SOS));
+}
+
+void test_sos_retry_jitter_larger_than_airtime() {
+  // Jitter do SOS até 5 s (> ~1,5 s de airtime de um SOS em SF11).
+  FakeSink sa;
+  randValue() = 4000;  // atraso inicial 4000 % 2001 = 1999; jitter 4000 % 5001 = 4000
+  Link a(sa, "A1", 0, randVar);
+  a.startSos(1, 2, 3, 0);
+  a.tick(1999);
+  TEST_ASSERT_EQUAL(1, sa.countSent(PktType::SOS));
+  a.tick(15998);
+  TEST_ASSERT_EQUAL(1, sa.countSent(PktType::SOS));
+  a.tick(15999);
+  TEST_ASSERT_EQUAL(2, sa.countSent(PktType::SOS));
+}
+
+void test_seen_carries_sos_seq() {
+  FakeSink sa, sb;
+  Link a(sa, "A1", 40, rand0), b(sb, "B2", 0, rand0);
+  a.startSos(1, 2, 3, 0);
+  deliver(sa, b, 0);
+  b.confirmSeen(100);
+  const Packet* seen = sb.lastSent(PktType::SEEN);
+  TEST_ASSERT_NOT_NULL(seen);
+  TEST_ASSERT_EQUAL_UINT8(40, seen->ackSeq);  // seq do SOS que foi visto
+}
+
+void test_seen_for_old_episode_ignored() {
+  FakeSink sa, sb;
+  Link a(sa, "A1", 0, rand0), b(sb, "B2", 0, rand0);
+  a.startSos(1, 2, 3, 0);
+  pumpAll(sa, a, sb, b, 0);
+  b.confirmSeen(1000);
+  drop(sb);              // SEEN perdido
+  a.cancelSos(2000);     // A cancela...
+  drop(sa);
+  for (int i = 0; i < 9; ++i) a.startSos(1, 2, 3, 3000 + i);  // ...e começa nova emergência (seqs novos)
+  drop(sa);
+  b.tick(11000);         // reenvio atrasado do SEEN antigo
+  deliver(sb, a, 11000);
+  TEST_ASSERT_EQUAL(SosState::Sending, a.sosState());
+}
+
+void test_pending_seen_mutes_only_briefly() {
+  FakeSink sa, sb;
+  Link a(sa, "A1", 0, rand0), b(sb, "B2", 0, rand0);
+  a.startSos(1, 2, 3, 0);
+  pumpAll(sa, a, sb, b, 0);
+  b.confirmSeen(1000);
+  drop(sb);              // SEEN e ACKs perdidos (enlace assimétrico)
+  a.cancelSos(2000);
+  drop(sa);
+  a.startSos(1, 2, 3, 60000);  // nova emergência bem depois
+  deliver(sa, b, 60000);
+  TEST_ASSERT_TRUE(b.peerSosActive());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_sos_resends_10s_then_30s);
@@ -212,5 +281,10 @@ int main(int, char**) {
   RUN_TEST(test_inflight_sos_after_seen_does_not_reraise);
   RUN_TEST(test_new_sos_after_seen_raises_alarm);
   RUN_TEST(test_restart_sos_cancels_pending_sosoff);
+  RUN_TEST(test_sos_start_delay_random);
+  RUN_TEST(test_sos_retry_jitter_larger_than_airtime);
+  RUN_TEST(test_seen_carries_sos_seq);
+  RUN_TEST(test_seen_for_old_episode_ignored);
+  RUN_TEST(test_pending_seen_mutes_only_briefly);
   return UNITY_END();
 }

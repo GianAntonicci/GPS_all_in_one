@@ -11,18 +11,26 @@ enum class Delivery : uint8_t { Delivered, Failed };
 enum class SosState : uint8_t { Idle, Sending, Received, Seen };
 
 struct LinkTiming {
-  uint32_t ackTimeoutMs = 4000, jitterMaxMs = 1000;
+  // SF11/BW125/CR4-8 (336 bit/s): MSG de 48 caracteres ~2,2 s no ar + ACK ~1 s.
+  uint32_t ackTimeoutMs = 7000, jitterMaxMs = 1000;
   uint8_t msgMaxAttempts = 3, sosFastAttempts = 6;
   uint32_t sosFastMs = 10000, sosSlowMs = 30000, dedupTtlMs = 60000;
+  // Jitter do SOS/SEEN/SOSOFF maior que o airtime (~1,5 s) para dois SOS simultâneos
+  // não colidirem sempre; atraso inicial aleatório pelo mesmo motivo.
+  uint32_t sosJitterMaxMs = 5000, sosStartDelayMaxMs = 2000;
+  // Depois de "Vi", SOS do amigo não reacende o alarme por este tempo (SOS em trânsito).
+  uint32_t seenMuteMs = 40000;
 };
 
 class LinkSink {
  public:
-  virtual void sendFrame(const char* data, size_t len) = 0;
+  // Retorna quantos ms a escrita bloqueou (espera do AUX); os timers contam a partir dali.
+  virtual uint32_t sendFrame(const char* data, size_t len) = 0;
   virtual void onPacket(const Packet& p, const Frame& f) = 0;  // pacote novo do amigo
   virtual void onDelivery(uint8_t seq, Delivery d) = 0;          // MSG/PING
   virtual void onSosState(SosState s) = 0;                       // o MEU SOS
   virtual void onPeerSos(bool active) = 0;                       // SOS do AMIGO
+  virtual void onIdConflict() = 0;  // chegou frame com o MEU ID: outro aparelho usa o mesmo ID
   virtual ~LinkSink() = default;
 };
 
@@ -74,8 +82,9 @@ class Link {
 
   uint8_t nextSeq() { return seq_++; }
   Packet make(PktType t);
-  void transmit(const Packet& p);
+  uint32_t transmit(const Packet& p);  // retorna ms bloqueados
   uint32_t jitter();
+  uint32_t sosJitter();
   int startReliable(Packet p, uint32_t now);
   void handleAck(uint8_t ackSeq);
   bool isDuplicate(const Packet& p, uint32_t now);
@@ -102,7 +111,9 @@ class Link {
 
   // SOS do amigo
   bool peerSos_ = false;
-  Pending seenOut_;  // SEEN até ACK (enquanto ativo, SOS do amigo não reacende o alarme)
+  uint8_t peerSosSeq_ = 0;  // seq do último SOS do amigo (vai no SEEN)
+  uint32_t seenAtMs_ = 0;
+  Pending seenOut_;  // SEEN até ACK
 
   bool hasPeer_ = false;
   uint32_t lastPeerRx_ = 0;

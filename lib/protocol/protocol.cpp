@@ -110,6 +110,7 @@ size_t protoEncode(const Packet& p, char* out, size_t cap) {
                    (long)p.alt, p.bat);
       break;
     case PktType::ACK:
+    case PktType::SEEN:
       n = snprintf(body, sizeof body, "%s,%s,%u,%u", tn, p.id, p.seq, p.ackSeq);
       break;
     case PktType::SOS:
@@ -117,7 +118,6 @@ size_t protoEncode(const Packet& p, char* out, size_t cap) {
                    p.bat);
       break;
     case PktType::PING:
-    case PktType::SEEN:
     case PktType::SOSOFF:
       n = snprintf(body, sizeof body, "%s,%s,%u", tn, p.id, p.seq);
       break;
@@ -213,7 +213,8 @@ bool protoDecode(const char* line, size_t len, Packet& out) {
       r.bat = (uint8_t)bat;
       break;
     }
-    case PktType::ACK: {
+    case PktType::ACK:
+    case PktType::SEEN: {
       if (nf != 4) return false;
       if (!parseLong(fb[3], fe[3], 0, 255, v)) return false;
       r.ackSeq = (uint8_t)v;
@@ -229,7 +230,6 @@ bool protoDecode(const char* line, size_t len, Packet& out) {
       break;
     }
     case PktType::PING:
-    case PktType::SEEN:
     case PktType::SOSOFF:
       if (nf != 3) return false;
       break;
@@ -244,4 +244,17 @@ void protoSanitize(const char* in, char* out, size_t cap) {
   size_t o = 0;
   for (size_t i = 0; in[i] && o < max; ++i) out[o++] = safeTextChar(in[i]) ? in[i] : '?';
   out[o] = 0;
+}
+
+void protoIdFromMac(const uint8_t mac[6], char out[3]) {
+  uint32_t h = 2166136261u;  // FNV-1a
+  for (int i = 0; i < 6; ++i) {
+    h ^= mac[i];
+    h *= 16777619u;
+  }
+  const char* digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  uint32_t v = h % (36 * 36);
+  out[0] = digits[v / 36];
+  out[1] = digits[v % 36];
+  out[2] = 0;
 }

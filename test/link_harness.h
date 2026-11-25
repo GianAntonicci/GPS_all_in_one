@@ -13,8 +13,10 @@ struct FakeSink : LinkSink {
   std::vector<std::pair<uint8_t, Delivery>> deliveries;
   std::vector<SosState> sosStates;
   std::vector<bool> peerSosEvents;
+  int idConflicts = 0;
+  uint32_t blockMs = 0;  // simula loraWrite bloqueando até o AUX liberar
 
-  void sendFrame(const char* data, size_t len) override {
+  uint32_t sendFrame(const char* data, size_t len) override {
     std::string s(data, len);
     raw.push_back(s);
     Packet p{};
@@ -22,7 +24,9 @@ struct FakeSink : LinkSink {
     bool ok = protoDecode(s.c_str(), len - 1, p);
     if (!ok) p.type = PktType::ACK, p.id[0] = '!';  // marca frame inválido
     sent.push_back(p);
+    return blockMs;
   }
+  void onIdConflict() override { ++idConflicts; }
   void onPacket(const Packet& p, const Frame&) override { rx.push_back(p); }
   void onDelivery(uint8_t seq, Delivery d) override { deliveries.push_back({seq, d}); }
   void onSosState(SosState s) override { sosStates.push_back(s); }
@@ -75,3 +79,5 @@ inline void pumpAll(FakeSink& sa, Link& a, FakeSink& sb, Link& b, uint32_t now) 
 
 inline uint32_t rand0() { return 0; }
 inline uint32_t rand500() { return 500; }
+inline uint32_t& randValue() { static uint32_t v = 0; return v; }
+inline uint32_t randVar() { return randValue(); }

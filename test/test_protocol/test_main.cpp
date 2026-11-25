@@ -1,5 +1,6 @@
 #include <unity.h>
 #include <cstdio>
+#include <cctype>
 #include <cstring>
 #include "protocol.h"
 
@@ -87,7 +88,8 @@ void test_all_types_roundtrip() {
   p.seq = 0;
 
   p.type = PktType::PING; roundtrip(p, q);
-  p.type = PktType::SEEN; roundtrip(p, q);
+  p.type = PktType::SEEN; p.ackSeq = 33; roundtrip(p, q);
+  TEST_ASSERT_EQUAL_UINT8(33, q.ackSeq);
   p.type = PktType::SOSOFF; roundtrip(p, q);
 
   p.type = PktType::ACK; p.ackSeq = 12; roundtrip(p, q);
@@ -197,6 +199,19 @@ void test_needs_ack() {
   TEST_ASSERT_FALSE(protoNeedsAck(PktType::ACK));
 }
 
+void test_id_from_mac() {
+  const uint8_t m1[6] = {0x24, 0x6F, 0x28, 0x01, 0x02, 0x10};
+  const uint8_t m2[6] = {0x24, 0x6F, 0x28, 0x01, 0x03, 0x10};  // mesmo último byte
+  char a[3], b[3], c[3];
+  protoIdFromMac(m1, a);
+  protoIdFromMac(m2, b);
+  protoIdFromMac(m1, c);
+  TEST_ASSERT_EQUAL(2, strlen(a));
+  TEST_ASSERT_TRUE(isalnum((unsigned char)a[0]) && isalnum((unsigned char)a[1]));
+  TEST_ASSERT_EQUAL_STRING(a, c);
+  TEST_ASSERT_NOT_EQUAL(0, strcmp(a, b));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_checksum_known);
@@ -215,5 +230,6 @@ int main(int, char**) {
   RUN_TEST(test_encode_msg_never_emits_high_bytes);
   RUN_TEST(test_encode_rejects_unsanitized_text);
   RUN_TEST(test_needs_ack);
+  RUN_TEST(test_id_from_mac);
   return UNITY_END();
 }
