@@ -1,5 +1,7 @@
 #include "gps_logic.h"
 
+#include "geo.h"
+
 namespace {
 bool isLeap(int y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
 
@@ -60,10 +62,34 @@ bool PosScheduler::due(uint32_t now, bool hasFix) {
     hadFix_ = false;
     return false;
   }
-  if (!hadFix_ || (int32_t)(now - next_) >= 0) {
-    hadFix_ = true;
+  hadFix_ = true;
+  // Fix que oscila não gera rajada: só envia quando chega o horário agendado
+  // (ou na hora, se nunca enviou ou se o horário já passou).
+  if (!sentOnce_ || (int32_t)(now - next_) >= 0) {
+    sentOnce_ = true;
     schedule(now);
     return true;
   }
   return false;
+}
+
+void SavePolicy::mark(uint32_t now, double lat, double lon) {
+  saved_ = true;
+  last_ = now;
+  lat_ = lat;
+  lon_ = lon;
+}
+
+bool SavePolicy::due(uint32_t now, bool hasFix, double lat, double lon) {
+  if (!hasFix) {
+    bool lost = hadFix_;
+    hadFix_ = false;
+    if (lost) mark(now, lat, lon);
+    return lost;
+  }
+  hadFix_ = true;
+  bool doSave = !saved_ || now - last_ >= kPeriodMs ||
+                (now - last_ >= kMinGapMs && distanceM(lat_, lon_, lat, lon) > kMoveM);
+  if (doSave) mark(now, lat, lon);
+  return doSave;
 }

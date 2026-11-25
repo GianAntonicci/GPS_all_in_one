@@ -111,6 +111,8 @@ MyPos myPos() {
   return m;
 }
 
+bool sosManual = false;  // SOS iniciado com coordenadas digitadas: não sobrescrever
+
 void handleCmd(Link& link, const RadioCmd& c, uint32_t now) {
   switch (c.kind) {
     case RadioCmdKind::Msg: {
@@ -125,6 +127,7 @@ void handleCmd(Link& link, const RadioCmd& c, uint32_t now) {
       link.sendPos(c.lat, c.lon, c.alt, myPos().bat, now);
       break;
     case RadioCmdKind::SosStart: {
+      sosManual = posKnown(c.lat, c.lon);
       // lat=lon=0 no comando = usar a minha posição (atual ou última conhecida).
       MyPos m = myPos();
       if (posKnown(c.lat, c.lon)) {
@@ -199,10 +202,12 @@ void radioTask(void*) {
     batteryPoll(millis());
     {
       MyPos m = myPos();
-      if (posSched.due(millis(), m.fix)) link.sendPos(m.lat, m.lon, m.alt, m.bat, millis());
       SosState ss = link.sosState();
-      if ((ss == SosState::Sending || ss == SosState::Received) &&
-          millis() - lastSosUpdate >= kSosUpdateMs) {
+      bool sosActive = ss == SosState::Sending || ss == SosState::Received;
+      // Durante o SOS a posição já vai no próprio SOS: POS extra só gastaria ar e colidiria.
+      if (posSched.due(millis(), m.fix) && !sosActive)
+        link.sendPos(m.lat, m.lon, m.alt, m.bat, millis());
+      if (sosActive && !sosManual && m.known && millis() - lastSosUpdate >= kSosUpdateMs) {
         link.updateSosPosition(m.lat, m.lon, m.bat);
         lastSosUpdate = millis();
       }

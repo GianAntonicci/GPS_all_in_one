@@ -11,13 +11,11 @@ namespace {
 
 constexpr uint32_t kFixMaxAgeMs = 3000;
 constexpr uint32_t kStateEveryMs = 200;
-constexpr uint32_t kSaveEveryMs = 10UL * 60UL * 1000UL;  // poupa a flash
 constexpr int kUtcOffsetHours = -3;
 
 TinyGPSPlus gGps;
 CourseTracker gCourse;
-bool gSavedThisBoot = false;
-uint32_t gLastSave = 0;
+SavePolicy gSave;  // 1º fix, perda do fix, > 200 m e a cada 10 min
 uint32_t gLastState = 0;
 
 void saveLastPosition(double lat, double lon, double crs) {
@@ -91,12 +89,11 @@ void gpsPoll(uint32_t now) {
     s.timeValid = true;
   }
   double lat = s.lat, lon = s.lon, crs = s.courseDeg;
+  bool known = s.myPosKnown;
   stateUnlock();
 
-  if (fix && (!gSavedThisBoot || now - gLastSave >= kSaveEveryMs)) {
+  if (known && gSave.due(now, fix, lat, lon)) {
     saveLastPosition(lat, lon, crs);
-    gSavedThisBoot = true;
-    gLastSave = now;
     LOGD("GPS: posicao salva na NVS");
   }
 }

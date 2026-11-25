@@ -84,9 +84,51 @@ void test_pos_scheduler_fix_lost_and_back() {
   PosScheduler s(r0);
   TEST_ASSERT_TRUE(s.due(0, true));
   TEST_ASSERT_FALSE(s.due(10000, false));
-  TEST_ASSERT_TRUE(s.due(12000, true));
-  TEST_ASSERT_FALSE(s.due(41999, true));
-  TEST_ASSERT_TRUE(s.due(42000, true));
+  TEST_ASSERT_FALSE(s.due(12000, true));   // voltou cedo: mantém o horário agendado
+  TEST_ASSERT_TRUE(s.due(30000, true));
+  TEST_ASSERT_FALSE(s.due(40000, false));
+  TEST_ASSERT_TRUE(s.due(90000, true));    // ficou muito tempo sem fix: envia na hora
+}
+
+void test_pos_scheduler_flapping_fix_no_burst() {
+  // Mata fechada: o fix some e volta a cada poucos segundos. Não pode virar rajada de POS.
+  PosScheduler s(r0);
+  TEST_ASSERT_TRUE(s.due(0, true));
+  for (uint32_t t = 2000; t < 30000; t += 4000) {
+    TEST_ASSERT_FALSE(s.due(t, false));
+    TEST_ASSERT_FALSE(s.due(t + 2000, true));
+  }
+  TEST_ASSERT_TRUE(s.due(30000, true));
+}
+
+void test_save_first_fix() {
+  SavePolicy p;
+  TEST_ASSERT_FALSE(p.due(0, false, 0, 0));
+  TEST_ASSERT_TRUE(p.due(1000, true, -23.5, -46.6));
+  TEST_ASSERT_FALSE(p.due(2000, true, -23.5, -46.6));
+}
+
+void test_save_when_fix_lost() {
+  SavePolicy p;
+  TEST_ASSERT_TRUE(p.due(0, true, -23.5, -46.6));
+  TEST_ASSERT_FALSE(p.due(30000, true, -23.5001, -46.6));
+  TEST_ASSERT_TRUE(p.due(31000, false, -23.5001, -46.6));  // entrou no túnel: grava a última
+  TEST_ASSERT_FALSE(p.due(32000, false, -23.5001, -46.6));
+}
+
+void test_save_when_moved_far() {
+  SavePolicy p;
+  TEST_ASSERT_TRUE(p.due(0, true, -23.5, -46.6));
+  TEST_ASSERT_FALSE(p.due(30000, true, -23.505, -46.6));   // ~550 m mas antes de 1 min
+  TEST_ASSERT_TRUE(p.due(60000, true, -23.505, -46.6));    // > 200 m e >= 1 min
+  TEST_ASSERT_FALSE(p.due(130000, true, -23.5055, -46.6)); // só ~55 m
+}
+
+void test_save_periodic() {
+  SavePolicy p;
+  TEST_ASSERT_TRUE(p.due(0, true, -23.5, -46.6));
+  TEST_ASSERT_FALSE(p.due(599999, true, -23.5, -46.6));
+  TEST_ASSERT_TRUE(p.due(600000, true, -23.5, -46.6));
 }
 
 int main(int, char**) {
@@ -105,5 +147,10 @@ int main(int, char**) {
   RUN_TEST(test_pos_scheduler_period_with_jitter);
   RUN_TEST(test_pos_scheduler_no_fix_never);
   RUN_TEST(test_pos_scheduler_fix_lost_and_back);
+  RUN_TEST(test_pos_scheduler_flapping_fix_no_burst);
+  RUN_TEST(test_save_first_fix);
+  RUN_TEST(test_save_when_fix_lost);
+  RUN_TEST(test_save_when_moved_far);
+  RUN_TEST(test_save_periodic);
   return UNITY_END();
 }

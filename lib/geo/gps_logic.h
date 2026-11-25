@@ -37,5 +37,21 @@ class PosScheduler {
   uint32_t (*rand_)();
   uint32_t period_, jitterMax_;
   bool hadFix_ = false;
+  bool sentOnce_ = false;
   uint32_t next_ = 0;
+};
+
+// Quando gravar a melhor posição conhecida na NVS: 1º fix, perda do fix (túnel),
+// deslocamento > 200 m (no mínimo 1 min depois da última gravação) e a cada 10 min.
+class SavePolicy {
+ public:
+  static constexpr uint32_t kPeriodMs = 600000, kMinGapMs = 60000;
+  static constexpr double kMoveM = 200.0;
+  bool due(uint32_t now, bool hasFix, double lat, double lon);  // true = gravar lat/lon agora
+
+ private:
+  void mark(uint32_t now, double lat, double lon);
+  bool saved_ = false, hadFix_ = false;
+  uint32_t last_ = 0;
+  double lat_ = 0, lon_ = 0;
 };
