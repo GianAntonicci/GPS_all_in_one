@@ -264,7 +264,10 @@ Limiares em constantes ajustáveis.
 
 Tons gerados via I2S (sem arquivos): bipe de clique, bipe de mensagem
 recebida, alarme de SOS (alternado, contínuo até o usuário confirmar).
-Volume da NVS.
+Volume da NVS. Etapa 5a: também bipes da contagem de SOS e tons de
+"recebido"/"visto" do meu SOS; **todos os sons de SOS ignoram o volume**
+(tocam alto mesmo em 0). Task `audio` dedicada (core 1). Ver
+`2026-11-25-etapa5a-audio-design.md`.
 
 ### Bateria
 
