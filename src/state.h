@@ -44,6 +44,9 @@ struct SharedState {
 
   // ---- IMU (task "imu") ----
   bool imuOk = false;
+
+  // ---- Scanner CC1101 (somente RX) ----
+  bool cc1101Ok = false;
 };
 
 void stateInit();  // cria o mutex; chamar no setup() antes de iniciar tasks

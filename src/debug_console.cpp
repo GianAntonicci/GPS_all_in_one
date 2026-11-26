@@ -27,8 +27,9 @@ void printStatus() {
   SharedState s = state();
   stateUnlock();
   uint32_t now = millis();
-  Serial.printf("[STATUS] lora=%s imu=%s sos=%s amigoSOS=%s%s\n", s.loraOk ? "ok" : "ERRO",
-                s.imuOk ? "ok" : "ERRO", sosName(s.mySos), s.peerSos ? "SIM" : "nao",
+  Serial.printf("[STATUS] lora=%s imu=%s cc1101=%s sos=%s amigoSOS=%s%s\n",
+                s.loraOk ? "ok" : "ERRO", s.imuOk ? "ok" : "ERRO", s.cc1101Ok ? "ok" : "ERRO",
+                sosName(s.mySos), s.peerSos ? "SIM" : "nao",
                 s.idConflict ? " ID-DUPLICADO" : "");
   if (s.peerRxMs)
     Serial.printf("[STATUS] ultimo pacote do amigo ha %lu s, rssi %s%d\n",

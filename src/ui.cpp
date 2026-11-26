@@ -9,6 +9,7 @@
 #include "map_view.h"
 #include "audio.h"
 #include "audio_cues.h"
+#include "cc1101.h"
 #include "input.h"
 #include "input_logic.h"
 #include "keyboard.h"
@@ -16,6 +17,7 @@
 #include "nav.h"
 #include "oled.h"
 #include "radio_task.h"
+#include "scanner_model.h"
 #include "sos_overlay.h"
 #include "state.h"
 #include "ui_format.h"
@@ -58,6 +60,8 @@ uint32_t gSeenAt = 0;
 bool gSeenEver = false;
 bool gDirty = true;
 AudioCues gCues;
+ScannerModel gScanner;
+bool gScannerActive = false;
 bool gMapPending = false;  // a tela Mapa ainda tem tile para carregar
 bool gScreenWasOn = true;
 
@@ -242,6 +246,14 @@ void onScreenInput(int8_t d, Gesture g, uint32_t now) {
     if (g == Gesture::Click) pop();
     return;
   }
+  if (s == Screen::Scanner) {  // giro = troca faixa (433/868/915), clique = voltar
+    if (d) {
+      gScanner.stepBand(d);
+      gDirty = true;
+    }
+    if (g == Gesture::Click) pop();
+    return;
+  }
   if (s == Screen::Settings) {
     onSettingsInput(d, g, now);
     return;
@@ -266,6 +278,7 @@ void onScreenInput(int8_t d, Gesture g, uint32_t now) {
         gSetView.editing = -1;
         gSetView.restarting = false;
       }
+      if (kTargets[i] == Screen::Scanner) gScanner.reset();
       push(kTargets[i]);
       break;
     }
@@ -396,7 +409,7 @@ void draw(const SharedState& s, uint32_t now) {
         ui::drawSettings(f, gSetView, c);
         break;
       case Screen::Map: gMapPending = mapDraw(f, s); break;
-      case Screen::Scanner: ui::drawSoon(f, "Scanner", "Em breve (etapa 5)"); break;
+      case Screen::Scanner: ui::drawScanner(f, gScanner, s.cc1101Ok); break;
     }
   }
   // Banner nunca cobre um overlay de SOS.
@@ -433,6 +446,7 @@ void updateOled(const SharedState& s, uint32_t now, bool blink) {
 void uiTask(void*) {
   if (!displayBegin()) LOGE("UI: display indisponivel");
   mapInit();
+  cc1101Begin();
   oledBegin();
   inputBegin();
   audioBegin(gSet->volume);
@@ -497,6 +511,23 @@ void uiTask(void*) {
       applyBrightness(on);
       gScreenWasOn = on;
       gDirty = true;
+    }
+
+    // Scanner CC1101 (somente RX): varre em lotes pequenos e dorme fora da tela/com SOS.
+    const bool scanNow = (top() == Screen::Scanner) && on && !gOverlay.active() && cc1101Ok();
+    if (scanNow) {
+      gScannerActive = true;
+      constexpr uint8_t kScanBatch = 4;
+      for (uint8_t k = 0; k < kScanBatch; ++k) {
+        int16_t dbm = ScannerModel::kFloorDbm;
+        if (cc1101MeasureRssi(gScanner.nextFreqMhz(), dbm)) {
+          gScanner.recordSample(dbm);
+          gDirty = true;
+        }
+      }
+    } else if (gScannerActive) {
+      cc1101Sleep();
+      gScannerActive = false;
     }
 
     // Reinício após trocar o ID (mostra "Reiniciando..." por 1 s)

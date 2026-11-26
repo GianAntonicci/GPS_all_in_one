@@ -538,4 +538,91 @@ void drawBanner(TFT_eSprite& f, const char* text) {
   f.drawString(text, 8, 20);
 }
 
+void drawScanner(TFT_eSprite& f, const ScannerModel& m, bool hwOk) {
+  if (!hwOk) {
+    drawSoon(f, "Scanner", "CC1101 nao detectado");
+    return;
+  }
+  f.fillSprite(kBg);
+
+  // Cabeçalho: faixa ativa à esquerda, maior pico à direita.
+  const BandDef& b = m.band();
+  f.fillRect(0, 0, SCREEN_W, 34, kBlock);
+  f.setTextFont(2);
+  f.setTextSize(1);
+  f.setTextColor(TFT_WHITE);
+  f.setTextDatum(ML_DATUM);
+  char title[32];
+  snprintf(title, sizeof title, "Scanner  %s", b.label);
+  f.drawString(title, 8, 17);
+
+  if (m.hasData()) {
+    char pk[32];
+    snprintf(pk, sizeof pk, "%.1fMHz %ddBm", m.peakFreqMhz(), (int)m.peakDbm());
+    f.setTextColor(kSel);
+    f.setTextDatum(MR_DATUM);
+    f.drawString(pk, SCREEN_W - 8, 17);
+  }
+
+  // Área do espectro: 60 barras x 5 px = 300 px (margem 10 px de cada lado).
+  constexpr int16_t kGraphX = 10;
+  constexpr int16_t kGraphY = 40;
+  constexpr int16_t kGraphW = ScannerModel::kBins * 5;
+  constexpr int16_t kGraphH = 156;
+  constexpr int16_t kBottom = kGraphY + kGraphH;
+  const uint16_t kGrid = rgb(0x28, 0x34, 0x42);
+  const uint16_t kBar = rgb(0x28, 0xB8, 0x60);
+  const uint16_t kBarStrong = rgb(0xF0, 0x60, 0x20);
+  const uint16_t kCursorCol = rgb(0x40, 0x68, 0x90);
+
+  // Linhas de referência (-100, -80, -60 dBm)
+  for (int16_t ref : {-100, -80, -60}) {
+    const int16_t y = kBottom - (int16_t)rssiToBarHeight(ref, kGraphH);
+    f.drawFastHLine(kGraphX, y, kGraphW, kGrid);
+  }
+  f.drawRect(kGraphX - 1, kGraphY - 1, kGraphW + 2, kGraphH + 2, kGrid);
+
+  // Linha sutil indicando a posição atual da varredura
+  const int16_t curX = kGraphX + m.cursor() * 5 + 1;
+  f.drawFastVLine(curX, kGraphY, kGraphH, kCursorCol);
+
+  for (uint8_t i = 0; i < ScannerModel::kBins; ++i) {
+    const int16_t x = kGraphX + i * 5;
+    const int16_t dbm = m.rssi(i);
+    const uint16_t bh = rssiToBarHeight(dbm, kGraphH);
+    if (bh > 0) {
+      f.fillRect(x, kBottom - (int16_t)bh, 4, (int16_t)bh, dbm >= -65 ? kBarStrong : kBar);
+    }
+    const uint16_t ph = rssiToBarHeight(m.peak(i), kGraphH);
+    if (ph > 0) {
+      const int16_t py = kBottom - (int16_t)ph;
+      f.fillRect(x, py > kGraphY ? py : kGraphY, 4, 2, kSel);
+    }
+  }
+
+  // Rodapé: início / meio / fim da faixa + dica de controles.
+  const float fStart = m.binFreqMhz(0);
+  const float fMid = m.binFreqMhz(ScannerModel::kBins / 2);
+  const float fEnd = m.binFreqMhz(ScannerModel::kBins - 1);
+  char s0[16], s1[16], s2[16];
+  snprintf(s0, sizeof s0, "%.1f", fStart);
+  snprintf(s1, sizeof s1, "%.1f MHz", fMid);
+  snprintf(s2, sizeof s2, "%.1f", fEnd);
+
+  f.setTextFont(1);
+  f.setTextSize(1);
+  f.setTextColor(kGrey);
+  f.setTextDatum(TL_DATUM);
+  f.drawString(s0, kGraphX, kBottom + 6);
+  f.setTextDatum(TC_DATUM);
+  f.drawString(s1, SCREEN_W / 2, kBottom + 6);
+  f.setTextDatum(TR_DATUM);
+  f.drawString(s2, kGraphX + kGraphW, kBottom + 6);
+
+  f.setTextFont(2);
+  f.setTextDatum(BC_DATUM);
+  f.setTextColor(kGrey);
+  f.drawString("Giro: faixa   Clique: voltar", SCREEN_W / 2, SCREEN_H - 4);
+}
+
 }  // namespace ui
