@@ -266,6 +266,16 @@ void test_pending_seen_mutes_only_briefly() {
   TEST_ASSERT_TRUE(b.peerSosActive());
 }
 
+void test_sos_attempts_counts_sends() {
+  FakeSink sa;
+  Link a(sa, "A1", 0, rand0);
+  TEST_ASSERT_EQUAL_UINT8(0, a.sosAttempts());
+  a.startSos(1, 2, 3, 0);
+  a.tick(10000);
+  a.tick(20000);
+  TEST_ASSERT_EQUAL_UINT8(3, a.sosAttempts());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_sos_resends_10s_then_30s);
@@ -286,5 +296,6 @@ int main(int, char**) {
   RUN_TEST(test_seen_carries_sos_seq);
   RUN_TEST(test_seen_for_old_episode_ignored);
   RUN_TEST(test_pending_seen_mutes_only_briefly);
+  RUN_TEST(test_sos_attempts_counts_sends);
   return UNITY_END();
 }

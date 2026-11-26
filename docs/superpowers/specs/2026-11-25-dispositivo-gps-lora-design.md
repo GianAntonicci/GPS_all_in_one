@@ -81,7 +81,10 @@ inofensivo.
 - **A (escolhida):** duas tasks FreeRTOS — *rádio* (core 0: GPS, LoRa,
   protocolo, ACK/reenvio de SOS, POS a cada 30 s, GPX) e *UI* (core 1:
   encoder, TFT, OLED, mapa, áudio, scanner) — mais uma task pequena do IMU
-  acordada pelo INT. Comunicação por filas (pacotes recebidos, pedidos de
+  acordada pelo INT. Etapa 4: o GPX saiu do rádio para uma task *sd*
+  (core 0, prioridade 1). O rádio só decide o ponto e o enfileira; a task
+  de SD grava o arquivo e a trilha em PSRAM, e o rádio nunca espera o SPI.
+  Ver `2026-11-25-etapa4-mapa-gpx-design.md`. Comunicação por filas (pacotes recebidos, pedidos de
   envio, eventos) e struct de estado compartilhada protegida por mutex.
   Escolhida porque decodificar JPG (~100 ms/tile) nunca atrasa SOS/ACK.
 - **B:** loop único com `millis()`. Rejeitada: JPG/SD bloqueiam o loop,
@@ -112,11 +115,12 @@ no `platformio.ini`; com 0 viram no-op.
 ### SPI compartilhado
 
 TFT, SD e CC1101 no mesmo FSPI. Um mutex global (`spiLock()/spiUnlock()`)
-envolve todo acesso; TFT_eSPI com `SUPPORT_TRANSACTIONS`. O driver SmartRC
-chama `SPI.begin()` por conta própria — inicializá-lo com `setSpiPin()` com
-os mesmos pinos e garantir que não reconfigure o barramento depois do boot
-(se necessário, encapsular/patch local em `lib/`). CC1101 colocado em sleep
-(`SIDLE`+`SPWD`) fora da tela do scanner.
+envolve todo acesso; TFT_eSPI com `SUPPORT_TRANSACTIONS`. Etapa 5c: em vez da
+lib SmartRC (que chama `SPI.begin()`/`SPI.end()` a cada registrador), o CC1101
+usa driver mínimo próprio somente-RX (`src/cc1101`) com `SPI.beginTransaction`
+sob `spiLock()` e timeout em MISO. CC1101 colocado em sleep (`SIDLE`+`SPWD`)
+fora da tela do scanner, com tela apagada ou durante overlay de SOS. Ver
+`2026-11-25-etapa5c-scanner-design.md`.
 
 ### Protocolo LoRa (texto, curto)
 
@@ -234,8 +238,10 @@ Hora local, bateria %, satélites, barra de sinal LoRa (RSSI ou idade do
 
 ### Mapa
 
-Tiles `/tiles/{z}/{x}/{y}.jpg` (256x256, slippy map OSM). Centro na minha
-posição; desenha os tiles que cobrem 240x320 (até 4 inteiros + bordas).
+Tiles `/tiles/{z}/{x}/{y}.jpg` (256x256, slippy map OSM, JPEG baseline;
+preparados por `tools/prepare_tiles.py`). Centro na minha posição; desenha
+os tiles que cobrem o viewport 320x240 em paisagem (até 3x2 tiles). A trilha
+da sessão atual é desenhada como linha sobre o mapa.
 Cache LRU em PSRAM de tiles decodificados (RGB565, 128 KB cada; ~24 tiles
 = 3 MB). Marca minha posição e a do amigo (se fora da tela, seta na
 borda). Zoom pelo encoder, limitado aos níveis que existirem no SD.
@@ -252,14 +258,20 @@ corte de energia.
 ### IMU
 
 MPU6050 com interrupção de movimento no GPIO 7 → acorda tela. Queda:
-pico > ~3 g seguido de imobilidade por 30 s → contagem de SOS cancelável.
-Limiares em constantes ajustáveis.
+pico ≥ 3 g seguido de assentamento (~1,5 s) e imobilidade por 30 s → contagem
+de SOS cancelável (sempre ativa, sem opção de desligar). Acelerômetro em ±8 g
+com giroscópio em standby; barramento I2C protegido por mutex compartilhado com
+o OLED. Limiares em constantes ajustáveis. Ver
+`2026-11-25-etapa5b-imu-design.md`.
 
 ### Áudio
 
 Tons gerados via I2S (sem arquivos): bipe de clique, bipe de mensagem
 recebida, alarme de SOS (alternado, contínuo até o usuário confirmar).
-Volume da NVS.
+Volume da NVS. Etapa 5a: também bipes da contagem de SOS e tons de
+"recebido"/"visto" do meu SOS; **todos os sons de SOS ignoram o volume**
+(tocam alto mesmo em 0). Task `audio` dedicada (core 1). Ver
+`2026-11-25-etapa5a-audio-design.md`.
 
 ### Bateria
 

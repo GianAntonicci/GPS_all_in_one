@@ -19,6 +19,11 @@
 // ---- SD e CC1101 ----
 #define PIN_SD_CS     21
 #define PIN_CC1101_CS 47
+#ifndef ENABLE_SD
+#define ENABLE_SD 1          // 0 = SD desligado (isolar problemas no hardware)
+#endif
+#define SD_SPI_HZ     20000000
+#define TRACK_CAPACITY 20000  // pontos da trilha em PSRAM (~160 KB)
 
 // ---- I2C (OLED 0x3C, MPU6050 0x68) ----
 #define PIN_I2C_SDA   8

@@ -2,8 +2,10 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "geo.h"
 #include "radio_task.h"
 #include "state.h"
+#include "ui.h"
 
 namespace {
 
@@ -25,7 +27,8 @@ void printStatus() {
   SharedState s = state();
   stateUnlock();
   uint32_t now = millis();
-  Serial.printf("[STATUS] lora=%s sos=%s amigoSOS=%s%s\n", s.loraOk ? "ok" : "ERRO",
+  Serial.printf("[STATUS] lora=%s imu=%s cc1101=%s sos=%s amigoSOS=%s%s\n",
+                s.loraOk ? "ok" : "ERRO", s.imuOk ? "ok" : "ERRO", s.cc1101Ok ? "ok" : "ERRO",
                 sosName(s.mySos), s.peerSos ? "SIM" : "nao",
                 s.idConflict ? " ID-DUPLICADO" : "");
   if (s.peerRxMs)
@@ -35,6 +38,35 @@ void printStatus() {
     Serial.printf("[STATUS] amigo em %.5f, %.5f alt %ld bat %u%% (ha %lu s)\n", s.peerLat,
                   s.peerLon, (long)s.peerAlt, s.peerBat,
                   (unsigned long)((now - s.peerPosMs) / 1000));
+  if (s.peerKnown && s.myPosKnown) {
+    double d = distanceM(s.lat, s.lon, s.peerLat, s.peerLon);
+    double b = bearingDeg(s.lat, s.lon, s.peerLat, s.peerLon);
+    if (s.courseKnown) {
+      Serial.printf("[STATUS] amigo a %.0f m, rumo %.0f graus (%+.0f em relacao ao meu rumo%s)\n",
+                    d, b, relativeBearingDeg(b, s.courseDeg), s.courseStale ? ", antigo" : "");
+    } else {
+      Serial.printf("[STATUS] amigo a %.0f m, rumo %.0f graus\n", d, b);
+    }
+  }
+}
+
+void printGps() {
+  stateLock();
+  SharedState s = state();
+  stateUnlock();
+  Serial.printf("[GPS] fix=%s sats=%u\n", s.gpsFix ? "sim" : "nao", s.sats);
+  if (s.myPosKnown)
+    Serial.printf("[GPS] %s %.5f, %.5f alt %.0f m vel %.1f km/h\n",
+                  s.gpsFix ? "posicao" : "ultima posicao", s.lat, s.lon, s.altM, s.speedKmh);
+  if (s.courseKnown)
+    Serial.printf("[GPS] rumo %.0f graus%s\n", s.courseDeg, s.courseStale ? " (antigo)" : "");
+  if (s.timeValid) {
+    const DateTime& t = s.localTime;
+    Serial.printf("[GPS] %02u/%02u/%04u %02u:%02u:%02u (UTC-3)\n", t.day, t.month, t.year, t.hour,
+                  t.minute, t.second);
+  }
+  Serial.printf("[BAT] %u%% (%lu mV)%s\n", s.batteryPct, (unsigned long)s.batteryMv,
+                s.batteryLow ? " BAIXA" : "");
 }
 
 void send(const RadioCmd& c) {
@@ -57,6 +89,11 @@ void handleLine(char* line) {
     c.lon = lon;
     c.bat = 100;
     send(c);
+  } else if (strcmp(line, "sos") == 0) {
+    c.kind = RadioCmdKind::SosStart;  // lat=lon=0: usa a minha posição
+    send(c);
+  } else if (strcmp(line, "gps") == 0) {
+    printGps();
   } else if (sscanf(line, "sos %lf %lf", &lat, &lon) == 2) {
     c.kind = RadioCmdKind::SosStart;
     c.lat = lat;
@@ -71,12 +108,31 @@ void handleLine(char* line) {
     send(c);
   } else if (strcmp(line, "status") == 0) {
     printStatus();
+  } else if (strcmp(line, "fall") == 0) {
+    Serial.println("[IMU] simulando queda (contagem SOS)");
+    uiRequestSosCountdown();
   } else if (*line) {
-    Serial.println("Comandos: ping | msg <texto> | pos <lat> <lon> | sos <lat> <lon> | cancel | vi | status");
+    Serial.println("Comandos: ping | msg <texto> | pos <lat> <lon> | sos [<lat> <lon>] | cancel | vi | gps | fall | status");
   }
 }
 
-void printEvent(const RadioEvt& e) {
+}  // namespace
+
+void consolePoll() {
+  while (Serial.available()) {
+    int ch = Serial.read();
+    if (ch == '\r') continue;
+    if (ch == '\n') {
+      gLine[gLen] = 0;
+      handleLine(gLine);
+      gLen = 0;
+    } else if (gLen + 1 < sizeof gLine) {
+      gLine[gLen++] = (char)ch;
+    }
+  }
+}
+
+void consolePrintEvent(const RadioEvt& e) {
   switch (e.kind) {
     case RadioEvtKind::Packet: {
       const Packet& p = e.pkt;
@@ -101,6 +157,12 @@ void printEvent(const RadioEvt& e) {
     case RadioEvtKind::MySos:
       Serial.printf("[SOS] meu: %s\n", sosName(e.sos));
       break;
+    case RadioEvtKind::MsgQueued:
+      Serial.printf("[TX] MSG seq %u na fila: %s\n", e.seq, e.pkt.text);
+      break;
+    case RadioEvtKind::MsgBusy:
+      Serial.println("[TX] aguarde: mensagem anterior ainda pendente");
+      break;
     case RadioEvtKind::IdConflict:
       Serial.println("[ERRO] outro aparelho usa o MESMO ID: as mensagens nao vao funcionar");
       break;
@@ -108,22 +170,4 @@ void printEvent(const RadioEvt& e) {
       Serial.println(e.peerSos ? "[SOS] AMIGO PEDIU SOCORRO (digite 'vi')" : "[SOS] alarme do amigo encerrado");
       break;
   }
-}
-
-}  // namespace
-
-void consolePoll() {
-  while (Serial.available()) {
-    int ch = Serial.read();
-    if (ch == '\r') continue;
-    if (ch == '\n') {
-      gLine[gLen] = 0;
-      handleLine(gLine);
-      gLen = 0;
-    } else if (gLen + 1 < sizeof gLine) {
-      gLine[gLen++] = (char)ch;
-    }
-  }
-  RadioEvt e;
-  while (radioNextEvent(e)) printEvent(e);
 }
