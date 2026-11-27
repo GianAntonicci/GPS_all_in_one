@@ -1,6 +1,6 @@
-# Design — Etapa 5b: IMU (MPU6050 — acordar tela e detecção de queda)
+# Design — Etapa 5b: IMU 9DoF (ICM-20948) e Barômetro (BME280)
 
-Data: 2026-11-25 · Complementa `2026-11-25-dispositivo-gps-lora-design.md` e `2026-11-25-etapa5a-audio-design.md`
+Data: 2026-11-25 (atualizado em 2026-11-27: migração MPU6050 → ICM-20948 + adição do BME280) · Complementa `2026-11-25-dispositivo-gps-lora-design.md` e `2026-11-25-etapa5a-audio-design.md`
 
 Segunda parte da etapa 5 (5a áudio concluída, **5b IMU**, 5c scanner CC1101).
 
@@ -88,6 +88,13 @@ Todos os limiares ficam em uma struct `FallConfig` com valores padrão em consta
   - derrubar o aparelho numa almofada e deixar 30 s imóvel inicia contagem de SOS com bipes altos;
   - pegar o aparelho antes dos 30 s cancela a suspeita;
   - calibrar `kMotionThr`, `kImpactG` e `kStillBandG` medindo no conjunto montado.
+
+## Atualização de Hardware (2026-11-27): ICM-20948 + BME280
+
+- **ICM-20948 (substitui MPU6050):** biblioteca `sparkfun/SparkFun 9DoF IMU Breakout - ICM 20948 - Arduino Library`, autodetectado em `0x68` (AD0=0) ou `0x69` (AD0=1). Mantém acelerômetro em ±8 g (saída convertida de mg para g para o `FallDetector`) e Wake-on-Motion (`WOMLogic` / `WOMThreshold`) no GPIO 7 (ativo alto, latched).
+- **Bússola (AK09916 interno):** lógica pura em `lib/imu/compass.{h,cpp}` (compensação de inclinação usando o acelerômetro, calibração hard-iron/soft-iron em modo "Calibrar bússola" de ~20 s, declinação magnética configurável com padrão `-21,5°` para São Paulo, ambos salvos na NVS). Seleção de fonte de rumo: `gps.course` quando há fix e velocidade ≥ 1,5 km/h; bússola calibrada quando parado (< 1,5 km/h) ou sem fix (removendo o aviso `"rumo antigo"`).
+- **BME280 (`src/bme.{h,cpp}` + `lib/env/baro_logic.{h,cpp}`):** biblioteca `adafruit/Adafruit BME280 Library`, autodetectado em `0x76` (fallback `0x77`). Lido a cada 5 s em modo *forced* pela task `imu` (mesmo se o ICM-20948 estiver ausente). Fornece temperatura, umidade, pressão com histórico circular de 3 h (tendência `↑ / → / ↓` e alerta de queda rápida > 2 hPa/3 h) e altitude barométrica suavizada e calibrada pelo GPS (`sats >= 6`, `HDOP <= 2.0`), exibida como principal na tela GPS e enviada como campo opcional no pacote `POS`.
+- **Scan I2C no boot e tolerância a falhas:** `i2cBusScan()` registra todos os endereços presentes no boot; a ausência do ICM-20948 ou do BME280 é tolerada e exibida como `"--"` na UI e no comando serial `sensors`.
 
 ## Deixado ao builder
 

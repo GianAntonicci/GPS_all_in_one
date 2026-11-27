@@ -14,17 +14,17 @@ Firmware completo em **PlatformIO (Arduino / FreeRTOS)** para um par de disposit
   - Disparado segurando o encoder por **≥ 2 s** em qualquer tela ou automaticamente por **detecção de queda** (contagem cancelável de 10 s).
   - Reenviado a cada 10 s até ACK automático (**RECEBIDO**) e depois a cada 30 s com posição atualizada até o outro usuário confirmar **"Vi"** (**VISTO**), ou até ser cancelado (`SOSOFF`).
 - **Interface e Navegação (TFT 2,0" ST7789 + OLED 128×32 + Encoder):**
-  - **Amigo:** distância (Haversine), seta direcional relativa ao seu rumo (com aviso de "rumo antigo" parado), RSSI e idade do último contato.
+  - **Amigo:** distância (Haversine), seta direcional relativa ao seu rumo (usa `gps.course` em movimento ≥ 1,5 km/h e bússola calibrada parado/sem fix, sem aviso de "rumo antigo"; mantém fallback com "rumo antigo" se a bússola não estiver calibrada), RSSI e idade do último contato.
   - **Mensagens:** 6 mensagens rápidas pré-definidas, teclado na tela pelo encoder e histórico com status de entrega (pendente / entregue / falhou + reenvio).
-  - **Mapa offline:** tiles 256×256 do cartão microSD (`/tiles/{z}/{x}/{y}.jpg`) com cache LRU em PSRAM (~24 tiles), sua posição, posição do amigo (ou seta na borda se fora da tela), linha da trilha da sessão e zoom pelo encoder.
-  - **GPS:** coordenadas, altitude, velocidade, satélites, hora local (UTC-3) e estado da gravação GPX.
+  - **Mapa offline:** tiles 256×256 do cartão microSD (`/tiles/{z}/{x}/{y}.jpg`) com cache LRU em PSRAM (~24 tiles), sua posição (seta orientada pelo rumo unificado), posição do amigo (ou seta na borda se fora da tela), linha da trilha da sessão e zoom pelo encoder.
+  - **GPS:** coordenadas, altitude barométrica calibrada pelo GPS (com fallback para altitude GPS), velocidade, satélites, HDOP, temperatura, umidade, pressão com seta de tendência (`↑ / → / ↓`) e alerta de queda rápida (`> 2 hPa` em 3 h), hora local (UTC-3) e estado da gravação GPX.
   - **Scanner CC1101 (somente RX):** espectro de 60 barras + peak-hold nas faixas **433**, **868** e **915 MHz**; entra em sleep (`SIDLE` + `SPWD`) fora da tela.
-  - **Configurações:** ID do aparelho (2 caracteres), brilho do TFT e volume (salvos na NVS); canal LoRa exibido apenas para leitura.
+  - **Configurações:** ID do aparelho (2 caracteres), brilho do TFT, volume, declinação magnética (padrão `-21,5°` para São Paulo) e modo **Calibrar bússola** (girar em 8 por ~20 s), salvos na NVS; canal LoRa exibido apenas para leitura.
   - **OLED sempre ligado:** hora local, bateria %, satélites, barra de sinal/idade do amigo, ícone de mensagem nova e avisos de SOS.
   - **Economia de energia:** TFT apaga após 30 s sem interação e acorda por encoder, movimento (IMU) ou mensagem/SOS recebido.
 - **Trilha GPX (`/tracks/AAAAMMDD_HHMMSS.gpx`):** grava ponto a cada 10 s ou 20 m com flush e fechamento válido de XML a cada ponto (resiste a corte abrupto de energia).
 - **Áudio I2S (MAX98357A):** tons gerados em software com rampa anti-estalo; **todos os sons de SOS ignoram o volume** e tocam alto mesmo com volume em 0.
-- **IMU (MPU6050):** acorda o TFT por movimento (INT no GPIO 7) e mantém detecção de queda **sempre ativa** (pico ≥ 3 g → 1,5 s de assentamento → 30 s de imobilidade → contagem de SOS).
+- **IMU 9DoF (ICM-20948) + Barômetro (BME280):** autodetecção I2C com scan no boot (cada sensor ausente é tolerado e exibe `"--"`). O ICM-20948 acorda o TFT por movimento (WoM no GPIO 7), mantém detecção de queda **sempre ativa** (pico ≥ 3 g → 1,5 s de assentamento → 30 s de imobilidade → contagem de SOS) e fornece bússola com compensação de inclinação (AK09916). O BME280 mede temperatura, umidade, pressão (tendência de 3 h) e altitude barométrica a cada 5 s.
 - **Monitoramento de bateria:** leitura via ADC1 (divisor 100k/100k), média móvel, curva Li-ion 1S e aviso abaixo de 15%.
 
 ---
@@ -38,7 +38,8 @@ Firmware completo em **PlatformIO (Arduino / FreeRTOS)** para um par de disposit
 | Display de status | OLED **SSD1306** 128×32 I2C (`0x3C`) |
 | Rádio LoRa | **DX-LR22-900T22D** (UART transparente, 915 MHz, 22 dBm) |
 | GPS | **NEO-6M** (UART 9600 bps) |
-| IMU | **MPU6050** I2C (`0x68`) com pino INT |
+| IMU / Bússola | **ICM-20948** 9DoF I2C (`0x68` ou `0x69`, autodetectado) com pino INT |
+| Barômetro / Clima | **BME280** I2C (`0x76` ou `0x77`, autodetectado) |
 | Áudio | Amplificador I2S **MAX98357A** + alto-falante (pino `SD` ligado a `VIN`) |
 | Scanner RF | **CC1101** SPI (somente recepção; `GDO0` não utilizado) |
 | Armazenamento | Leitor **microSD** SPI (cartão formatado em FAT32) |
@@ -57,8 +58,8 @@ Definida em [src/config.h](src/config.h):
 | TFT `CS` / `DC` / `BL` | `10` / `9` / `14` | `TFT_RST` ligado ao `EN` (`-1`); `BL` com PWM |
 | microSD `CS` | `21` | Compartilha FSPI sob mutex `spiLock()` |
 | CC1101 `CS` | `47` | Compartilha FSPI; somente RX (`GDO0` não usado) |
-| I2C `SDA` / `SCL` | `8` / `18` | Compartilhado (OLED `0x3C` e MPU6050 `0x68`) sob `i2cLock()` |
-| MPU6050 `INT` | `7` | Interrupção de movimento (ativo alto, latched) |
+| I2C `SDA` / `SCL` | `8` / `18` | Compartilhado (OLED `0x3C`, ICM-20948 `0x68/0x69`, BME280 `0x76/0x77`) sob `i2cLock()` |
+| ICM-20948 `INT` | `7` | Interrupção Wake-on-Motion (ativo alto, latched) |
 | GPS `RX` / `TX` (lado ESP) | `44` / `43` | `Serial1`, 9600 bps |
 | LoRa `RX` / `TX` (lado ESP) | `40` / `39` | `Serial2`, 9600 bps |
 | LoRa `M0` / `M1` / `AUX` | `41` / `42` / `2` | `M0`/`M1` sempre `INPUT_PULLDOWN`; `AUX` alto = ocupado |
@@ -83,21 +84,22 @@ O firmware separa **lógica pura testável no host** (`lib/`, sem dependência d
 │   ├── sd_task.*           # Core 0: gravação GPX no SD e trilha em PSRAM
 │   ├── ui.*, ui_screens.*  # Core 1: encoder, TFT, OLED, mapa, scanner e overlays
 │   ├── audio.*             # Core 1: síntese I2S e fila de padrões sonoros
-│   ├── imu.*               # Core 1: MPU6050 acordado por INT (GPIO 7)
+│   ├── imu.*, bme.*        # Core 1: ICM-20948 (WoM, queda, bússola) e BME280 (a cada 5 s)
 │   ├── cc1101.*            # Driver mínimo somente-RX do CC1101 no SPI compartilhado
-│   ├── spi_bus.*, i2c_bus.*# Mutexes globais dos barramentos compartilhados
+│   ├── spi_bus.*, i2c_bus.*# Mutexes globais dos barramentos compartilhados + scan I2C no boot
 │   └── debug_console.*     # Console serial interativo (USB CDC 115200)
 ├── lib/                    # Módulos puros (C++17, sem Arduino)
-│   ├── protocol/           # protocol, framer (RSSI), lora_at, lora_link (ACK/SOS)
+│   ├── protocol/           # protocol (incl. baroAlt opcional no POS), framer, lora_at, lora_link
 │   ├── geo/                # Haversine, bearing, conversão UTC-3, rumo
 │   ├── power/              # Curva de bateria Li-ion
 │   ├── ui_logic/           # Navegação, teclado, histórico, overlays de SOS, OLED
 │   ├── map/                # Projeção slippy map, seta de borda, cache LRU
 │   ├── track/              # Política de pontos, buffer de trilha, GPX, sonda SD
 │   ├── audio/              # ToneSequencer (prioridades/volume) e AudioCues
-│   ├── imu/                # FallDetector (impacto + assentamento + imobilidade)
+│   ├── imu/                # FallDetector e bússola (tilt compensation, calibração, fonte de rumo)
+│   ├── env/                # BaroAltimeter (calibração GPS + EMA) e PressureHistory (3 h)
 │   └── scanner/            # Frequência 26 MHz, RSSI dBm e ScannerModel
-├── test/                   # 23 suítes Unity (253 testes rodando no PC)
+├── test/                   # 25 suítes Unity (269 testes rodando no PC)
 ├── tools/                  # Script Python para converter tiles de mapa (JPEG baseline)
 └── docs/                   # Guia de mapas offline, specs de design e planos
 ```
@@ -110,7 +112,7 @@ O firmware separa **lógica pura testável no host** (`lib/`, sem dependência d
 | `sd` | 0 | 1 | Gravação de GPX no microSD e buffer da trilha em PSRAM |
 | `audio` | 1 | 3 | Síntese de tons I2S (acima da UI para nunca picotar) |
 | `ui` | 1 | 2 | Encoder, telas TFT, OLED, mapa e varredura incremental do scanner |
-| `imu` | 1 | 1 | Dorme até o INT (GPIO 7); acorda TFT e amostra queda a 50 Hz |
+| `imu` | 1 | 1 | ICM-20948 (WoM via GPIO 7, queda a 50 Hz, bússola com TFT aceso) e BME280 a cada 5 s |
 
 ---
 
@@ -135,7 +137,7 @@ cd GPS_all_in_one
 pio test -e native
 ```
 
-Executa todas as 23 suítes (`253` testes) validando protocolo LoRa, SOS, GPS, bateria, UI, mapa, GPX, áudio, detector de queda e scanner.
+Executa todas as 25 suítes (`269` testes) validando protocolo LoRa, SOS, GPS, bateria, UI, mapa, GPX, áudio, detector de queda, bússola, barômetro e scanner.
 
 ### 4. Compilar o firmware para o ESP32-S3
 
@@ -198,7 +200,8 @@ Consulte o guia completo em [docs/mapas-offline.md](docs/mapas-offline.md).
 
 1. Ligue os dois aparelhos. Cada um gera um ID padrão de 2 caracteres a partir do MAC (ex.: `A1`, `B7`).
 2. Se por acaso os dois tiverem o mesmo ID (o OLED e as Configurações exibem alerta de conflito), abra **Configurações → ID**, ajuste um deles e confirme (o aparelho reinicia automaticamente).
-3. Ajuste **Brilho** e **Volume** em **Configurações** (o volume dá prévia sonora ao girar; lembrar que os sons de SOS tocam alto mesmo com volume 0).
+3. Ajuste **Brilho**, **Volume** e **Declinação magnética** (padrão `-21,5°` para São Paulo) em **Configurações** (o volume dá prévia sonora ao girar; lembrar que os sons de SOS tocam alto mesmo com volume 0).
+4. Execute **Configurações → Calibrar bússola** girando o aparelho em formato de **8** em todas as direções por ~20 s para salvar offsets/escalas na NVS.
 
 ---
 
@@ -208,7 +211,8 @@ Com `-DDEBUG_LOG=1`, você pode operar e inspecionar o aparelho pelo monitor ser
 
 | Comando | Ação |
 |---|---|
-| `status` | Exibe estado de `lora`, `imu`, `cc1101`, SOS, último contato, RSSI e distância/rumo até o amigo |
+| `status` | Exibe estado de `lora`, `imu` (e endereço), `mag`, `bme` (e endereço), `cc1101`, SOS, último contato, RSSI e distância/rumo até o amigo |
+| `sensors` | Exibe detalhes do ICM-20948 (bússola, calibração, declinação), BME280 (temp, umidade, pressão, tendência 3 h, altitude barométrica) e rumo atual + fonte |
 | `gps` | Exibe fix, satélites, coordenadas, altitude, velocidade, rumo, hora UTC-3 e bateria |
 | `ping` | Envia um `PING` ao outro aparelho |
 | `msg <texto>` | Envia uma mensagem curta (até 48 caracteres ASCII) |
@@ -224,13 +228,14 @@ Com `-DDEBUG_LOG=1`, você pode operar e inspecionar o aparelho pelo monitor ser
 
 Como o firmware foi desenvolvido e validado com testes nativos antes da montagem física, siga esta ordem ao ligar o hardware pela primeira vez:
 
-1. **Boot & Serial:** conecte o USB e verifique `status` — confira `lora=ok`, `imu=ok`, `cc1101=ok` e leitura de bateria (`gps`).
+1. **Boot & Serial:** conecte o USB, verifique o scan I2C no boot (esperados `0x3C`, `0x68/0x69`, `0x76/0x77`) e rode `status` e `sensors` — confira `lora=ok`, `imu=ok`, `bme=ok`, `cc1101=ok` e leitura de bateria (`gps`). Teste também desconectar ICM ou BME para confirmar que o aparelho continua funcionando mostrando `"--"`.
 2. **LoRa (2 aparelhos):** teste `ping`, `msg ola` e `sos` / `vi` / `cancel` pelo serial; confirme que o `AT+DRSSI1` traz o RSSI e que a tensão no VCC do DX-LR22 se mantém ≥ 5 V durante TX.
 3. **Display, OLED e Encoder:** confirme orientação/cores do ST7789, leitura do OLED `0x3C`, direção do giro do encoder e clique curto/longo.
 4. **Áudio I2S:** teste clique em Configurações (volume 0 deve silenciar clique/mensagem, mas `fall` / SOS do amigo devem tocar alto, sem estalos).
 5. **Mapa e microSD:** insira o cartão FAT32 com `/tiles/`, abra **Mapa**, teste zoom, remova/reinsira o cartão e confira a gravação de `/tracks/*.gpx` após obter fix GPS ao ar livre.
-6. **IMU (MPU6050):** aguarde o TFT apagar (30 s) e mexa o aparelho (deve acordar); simule queda numa almofada e aguarde 30 s imóvel (deve abrir contagem de SOS); pegue antes dos 30 s (deve cancelar). Ajuste `kMotionThr`, `impactG` e `stillBandG` se necessário.
-7. **Scanner CC1101:** abra **Scanner**, alterne entre 433 / 868 / 915 MHz, transmita uma mensagem no segundo aparelho em 921,15 MHz para ver o pico subir na faixa de 915 MHz, e confirme que TFT e SD seguem funcionando normalmente após sair da tela.
+6. **IMU e Bússola (ICM-20948):** execute **Configurações → Calibrar bússola** girando em 8 por 20 s, confirme que a seta na tela **Amigo** gira em tempo real parado (sem aviso "rumo antigo") e verifique o rumo com `sensors`. Aguarde o TFT apagar (30 s) e mexa o aparelho (deve acordar via WoM no GPIO 7); simule queda numa almofada e aguarde 30 s imóvel (contagem de SOS) e pegue antes dos 30 s (cancela). Ajuste `kWomThreshold`, `impactG` e `stillBandG` se necessário.
+7. **Barômetro (BME280):** confira temperatura, umidade, pressão e seta de tendência na tela **GPS** e em `sensors`. Ao ar livre com fix bom (`>= 6` satélites, `HDOP <= 2.0`), verifique a calibração automática da altitude barométrica e o envio no pacote `POS`.
+8. **Scanner CC1101:** abra **Scanner**, alterne entre 433 / 868 / 915 MHz, transmita uma mensagem no segundo aparelho em 921,15 MHz para ver o pico subir na faixa de 915 MHz, e confirme que TFT e SD seguem funcionando normalmente após sair da tela.
 
 ---
 
