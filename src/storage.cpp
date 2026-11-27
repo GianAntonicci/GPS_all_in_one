@@ -47,6 +47,8 @@ void settingsLoad(Settings& s) {
       s.magCal.scaleX <= 0.0f || s.magCal.scaleY <= 0.0f || s.magCal.scaleZ <= 0.0f) {
     s.magCal = MagCal{};
   }
+  s.imuMount = imuMountFromUint8(p.getUChar("imnt", IMU_MOUNT_DEFAULT),
+                                 imuMountFromUint8(IMU_MOUNT_DEFAULT));
   p.end();
   if (validId(id)) {
     strncpy(s.id, id.c_str(), sizeof s.id);
@@ -54,8 +56,8 @@ void settingsLoad(Settings& s) {
   } else {
     defaultId(s.id);
   }
-  LOGI("Settings: id=%s brilho=%u volume=%u decl=%.1f cal=%s", s.id, s.brightness, s.volume,
-       s.magDeclination, s.magCal.valid ? "sim" : "nao");
+  LOGI("Settings: id=%s brilho=%u volume=%u decl=%.1f cal=%s mount=%s", s.id, s.brightness,
+       s.volume, s.magDeclination, s.magCal.valid ? "sim" : "nao", imuMountName(s.imuMount));
 }
 
 void settingsSave(const Settings& s) {
@@ -72,5 +74,6 @@ void settingsSave(const Settings& s) {
   p.putFloat("msx", s.magCal.scaleX);
   p.putFloat("msy", s.magCal.scaleY);
   p.putFloat("msz", s.magCal.scaleZ);
+  p.putUChar("imnt", static_cast<uint8_t>(s.imuMount));
   p.end();
 }

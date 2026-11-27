@@ -36,6 +36,7 @@
 #define I2C_ADDR_BME_PRIMARY   0x76
 #define I2C_ADDR_BME_ALT       0x77
 #define MAG_DECLINATION_DEFAULT (-21.5f)    // São Paulo (graus, negativo = Oeste)
+#define IMU_MOUNT_DEFAULT       0           // ImuMount::PLACA_PADRAO (0..23)
 
 // ---- GPS NEO-6M (Serial1, lado ESP) ----
 #define PIN_GPS_RX    44

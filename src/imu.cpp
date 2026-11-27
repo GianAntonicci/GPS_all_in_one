@@ -26,9 +26,11 @@ ICM_20948_I2C gIcm;
 bool gMagOk = false;
 uint8_t gIcmAddr = 0;
 
-// Estado de calibração compartilhado entre UI e task IMU (protegido por stateLock()).
+// Estado de calibração e montagem compartilhado entre UI e task IMU (protegido por stateLock()).
 MagCal gCal{};
 float gDeclination = MAG_DECLINATION_DEFAULT;
+ImuMount gMount = imuMountFromUint8(IMU_MOUNT_DEFAULT);
+bool gMonitorActive = false;
 bool gCalActive = false;
 bool gCalDone = false;
 bool gCalSuccess = false;
@@ -51,6 +53,7 @@ void setImuStatus(bool ok, uint8_t addr, bool magOk) {
   SharedState& s = state();
   s.imuOk = ok;
   s.imuAddr = addr;
+  s.imuMount = gMount;
   s.compassOk = ok && magOk;
   s.compassCalibrated = gCal.valid;
   s.magDeclination = gDeclination;
@@ -104,24 +107,47 @@ bool configureIcm() {
   return false;
 }
 
-// Lê aceleração (em g) e magnetômetro (em uT, alinhado aos eixos do acelerômetro).
-bool readIcm(float& axG, float& ayG, float& azG, float& mxUt, float& myUt, float& mzUt,
-             bool& hasMag) {
+// Lê aceleração (g), giroscópio (dps) e magnetômetro (uT) já remapeados para o referencial
+// do aparelho (+X topo da tela, +Y esquerda, +Z para cima).
+bool readIcm(float& axG, float& ayG, float& azG, float& gxDps, float& gyDps, float& gzDps,
+             float& mxUt, float& myUt, float& mzUt, bool& hasMag) {
+  stateLock();
+  const ImuMount mount = gMount;
+  stateUnlock();
+
   i2cLock();
   gIcm.getAGMT();
   const bool ok = (gIcm.status == ICM_20948_Stat_Ok);
+  float rawAx = 0, rawAy = 0, rawAz = 0;
+  float rawGx = 0, rawGy = 0, rawGz = 0;
+  float rawMx = 0, rawMy = 0, rawMz = 0;
   if (ok) {
     // SparkFun ICM_20948 retorna aceleração em mg -> converte para g.
-    axG = gIcm.accX() * 0.001f;
-    ayG = gIcm.accY() * 0.001f;
-    azG = gIcm.accZ() * 0.001f;
+    rawAx = gIcm.accX() * 0.001f;
+    rawAy = gIcm.accY() * 0.001f;
+    rawAz = gIcm.accZ() * 0.001f;
+    rawGx = gIcm.gyrX();
+    rawGy = gIcm.gyrY();
+    rawGz = gIcm.gyrZ();
     // No ICM-20948, o AK09916 tem eixos Y e Z invertidos em relação ao acelerômetro.
-    mxUt = gIcm.magX();
-    myUt = -gIcm.magY();
-    mzUt = -gIcm.magZ();
+    rawMx = gIcm.magX();
+    rawMy = -gIcm.magY();
+    rawMz = -gIcm.magZ();
     hasMag = gMagOk;
   }
   i2cUnlock();
+
+  if (ok) {
+    applyMount(mount, rawAx, rawAy, rawAz, axG, ayG, azG);
+    applyMount(mount, rawGx, rawGy, rawGz, gxDps, gyDps, gzDps);
+    applyMount(mount, rawMx, rawMy, rawMz, mxUt, myUt, mzUt);
+    stateLock();
+    SharedState& s = state();
+    s.accelX = axG;
+    s.accelY = ayG;
+    s.accelZ = azG;
+    stateUnlock();
+  }
   return ok;
 }
 
@@ -249,12 +275,13 @@ void imuTask(void*) {
 
     stateLock();
     const bool needCompass = gMagOk && (state().tftOn || gCalActive);
+    const bool needMonitor = gMonitorActive;
     stateUnlock();
 
     if (detector.wantsSampling()) {
-      float ax = 0, ay = 0, az = 0, mx = 0, my = 0, mz = 0;
+      float ax = 0, ay = 0, az = 0, gx = 0, gy = 0, gz = 0, mx = 0, my = 0, mz = 0;
       bool hasMag = false;
-      if (!readIcm(ax, ay, az, mx, my, mz, hasMag)) {
+      if (!readIcm(ax, ay, az, gx, gy, gz, mx, my, mz, hasMag)) {
         if (++consecErrors >= kMaxReadErrors) {
           LOGE("IMU: falha consecutiva de leitura I2C, abortando amostragem");
           setImuStatus(false, gIcmAddr, false);
@@ -274,7 +301,7 @@ void imuTask(void*) {
         LOGW("IMU: queda detectada, iniciando contagem SOS");
         uiRequestSosCountdown();
       }
-      if (hasMag && (needCompass && (tNow - lastCompassRead >= kCompassPollMs))) {
+      if (hasMag && ((needCompass || needMonitor) && (tNow - lastCompassRead >= kCompassPollMs))) {
         processCompassSample(ax, ay, az, mx, my, mz, tNow);
         lastCompassRead = tNow;
       }
@@ -288,10 +315,10 @@ void imuTask(void*) {
       continue;
     }
 
-    if (needCompass) {
-      float ax = 0, ay = 0, az = 0, mx = 0, my = 0, mz = 0;
+    if (needCompass || needMonitor) {
+      float ax = 0, ay = 0, az = 0, gx = 0, gy = 0, gz = 0, mx = 0, my = 0, mz = 0;
       bool hasMag = false;
-      if (readIcm(ax, ay, az, mx, my, mz, hasMag)) {
+      if (readIcm(ax, ay, az, gx, gy, gz, mx, my, mz, hasMag)) {
         if (consecErrors > 0) {
           consecErrors = 0;
           setImuStatus(true, gIcmAddr, gMagOk);
@@ -325,11 +352,68 @@ void imuConfigureCompass(const MagCal& cal, float declinationDeg) {
   stateUnlock();
 }
 
+void imuConfigureMount(ImuMount mount) {
+  stateLock();
+  gMount = mount;
+  state().imuMount = mount;
+  stateUnlock();
+}
+
 void imuSetDeclination(float declinationDeg) {
   stateLock();
   gDeclination = declinationDeg;
   state().magDeclination = declinationDeg;
   stateUnlock();
+}
+
+void imuSetMount(ImuMount mount, bool invalidateCompassCal) {
+  stateLock();
+  gMount = mount;
+  SharedState& s = state();
+  s.imuMount = mount;
+  if (invalidateCompassCal) {
+    gCal = MagCal{};
+    s.compassCalibrated = false;
+  }
+  stateRefreshHeading(s);
+  stateUnlock();
+  LOGI("IMU: orientacao alterada para %s%s", imuMountName(mount),
+       invalidateCompassCal ? " (calibracao da bussola invalidada)" : "");
+}
+
+bool imuCaptureRawAccel(float& axG, float& ayG, float& azG) {
+  stateLock();
+  const bool ok = state().imuOk;
+  stateUnlock();
+  if (!ok) return false;
+
+  constexpr int kSamples = 10;
+  float sx = 0.0f, sy = 0.0f, sz = 0.0f;
+  int good = 0;
+  for (int i = 0; i < kSamples; ++i) {
+    i2cLock();
+    gIcm.getAGMT();
+    if (gIcm.status == ICM_20948_Stat_Ok) {
+      sx += gIcm.accX() * 0.001f;
+      sy += gIcm.accY() * 0.001f;
+      sz += gIcm.accZ() * 0.001f;
+      ++good;
+    }
+    i2cUnlock();
+    vTaskDelay(pdMS_TO_TICKS(15));
+  }
+  if (good < 5) return false;
+  axG = sx / (float)good;
+  ayG = sy / (float)good;
+  azG = sz / (float)good;
+  return true;
+}
+
+void imuSetMonitorActive(bool active) {
+  stateLock();
+  gMonitorActive = active;
+  stateUnlock();
+  if (active && gImuTask) xTaskNotifyGive(gImuTask);
 }
 
 bool imuStartCompassCal() {

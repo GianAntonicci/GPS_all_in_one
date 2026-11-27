@@ -2,6 +2,7 @@
 // Configurações persistentes (Preferences/NVS). SD e GPX entram na etapa do mapa/trilha.
 #include <cstdint>
 #include "compass.h"
+#include "mount.h"
 
 struct Settings {
   char id[3];          // ID do aparelho no protocolo (1-2 alfanuméricos)
@@ -9,6 +10,7 @@ struct Settings {
   uint8_t volume;      // 0-100
   float magDeclination;
   MagCal magCal;
+  ImuMount imuMount;
 };
 
 void settingsLoad(Settings& s);
