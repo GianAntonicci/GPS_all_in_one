@@ -50,6 +50,7 @@ void gpsBegin() {
   s.courseDeg = crs;
   s.courseKnown = ok;
   s.courseStale = true;
+  stateRefreshHeading(s);
   stateUnlock();
   if (ok) LOGI("GPS: ultima posicao salva %.5f, %.5f", lat, lon);
 }
@@ -82,6 +83,7 @@ void gpsPoll(uint32_t now) {
   s.courseDeg = gCourse.course();
   s.courseKnown = gCourse.known();
   s.courseStale = gCourse.stale();
+  stateRefreshHeading(s);
   if (gGps.date.isValid() && gGps.time.isValid() && gGps.date.year() >= 2024) {
     DateTime utc{gGps.date.year(), gGps.date.month(), gGps.date.day(),
                  gGps.time.hour(), gGps.time.minute(), gGps.time.second()};

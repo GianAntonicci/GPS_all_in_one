@@ -32,12 +32,20 @@ void drawKeyboard(TFT_eSprite& f, const KeyboardModel& kb, uint8_t cursor);
 struct SettingsView {
   char id[3];
   uint8_t brightness, volume;  // %
-  int8_t editing;              // -1 nenhum, 1 = ID, 2 = brilho, 3 = volume
+  float declination;           // graus (-45.0 .. +45.0)
+  int8_t editing;              // -1 nenhum, 1 = ID, 2 = brilho, 3 = volume, 4 = declinação
   uint8_t idPos;               // caractere do ID em edição (0/1)
   bool idConflict;
   bool restarting;
+  bool compassOk;
+  bool compassCalibrated;
+  bool calibrating;
+  bool calDone;
+  bool calSuccess;
+  uint8_t calPct;
+  uint32_t calSamples;
 };
-// cursor: 0 = Voltar, 1 = ID, 2 = Brilho, 3 = Volume, 4 = Canal
+// cursor: 0 = Voltar, 1 = ID, 2 = Brilho, 3 = Volume, 4 = Declinacao, 5 = Calibrar bussola, 6 = Canal
 void drawSettings(TFT_eSprite& f, const SettingsView& v, uint8_t cursor);
 
 void drawOverlay(TFT_eSprite& f, Overlay o, const SharedState& s, uint8_t countdownLeft,

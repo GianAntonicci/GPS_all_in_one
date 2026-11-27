@@ -216,8 +216,8 @@ void drawMe(TFT_eSprite& f, const SharedState& s, const PixelPos& c) {
   if (!s.myPosKnown) return;
   ScreenPt p = toScreen(latLonToPixel(s.lat, s.lon, gZoom), c, SCREEN_W, SCREEN_H);
   const uint16_t col = s.gpsFix ? kMe : kMeStale;
-  if (s.courseKnown) {
-    arrowHead(f, p.x, p.y, s.courseDeg, 20, col, !s.courseStale);
+  if (s.headingKnown) {
+    arrowHead(f, p.x, p.y, s.headingDeg, 20, col, !s.headingStale);
   } else {
     f.fillCircle(p.x, p.y, 6, col);
     f.drawCircle(p.x, p.y, 7, TFT_WHITE);

@@ -91,11 +91,11 @@ FriendVec friendVec(const SharedState& s) {
   v.ok = true;
   v.dist = distanceM(s.lat, s.lon, s.peerLat, s.peerLon);
   double b = bearingDeg(s.lat, s.lon, s.peerLat, s.peerLon);
-  if (s.courseKnown) {
+  if (s.headingKnown) {
     v.relative = true;
-    v.rel = relativeBearingDeg(b, s.courseDeg);
+    v.rel = relativeBearingDeg(b, s.headingDeg);
     v.arrowDeg = v.rel;
-    v.stale = s.courseStale;
+    v.stale = s.headingStale;
   } else {
     v.arrowDeg = b;  // norte para cima
   }
@@ -262,8 +262,11 @@ void drawGps(TFT_eSprite& f, const SharedState& s) {
   }
   snprintf(b, sizeof b, "Altitude %.0f m   Vel. %.1f km/h", s.altM, s.speedKmh);
   line(b);
-  if (s.courseKnown) snprintf(b, sizeof b, "Rumo %.0f graus%s", s.courseDeg, s.courseStale ? " (antigo)" : "");
-  else snprintf(b, sizeof b, "Rumo: --");
+  if (s.headingKnown) {
+    snprintf(b, sizeof b, "Rumo %.0f graus (%s)", s.headingDeg, headingSourceName(s.headingSource));
+  } else {
+    snprintf(b, sizeof b, "Rumo: --");
+  }
   line(b);
   if (s.timeValid) {
     const DateTime& t = s.localTime;
@@ -417,21 +420,49 @@ void drawSettings(TFT_eSprite& f, const SettingsView& v, uint8_t cursor) {
     centered(f, "Reiniciando...", 120, 4, 1, kText);
     return;
   }
+  if (v.calibrating || v.calDone) {
+    centered(f, "Calibrar bussola", 34, 4, 1, TFT_WHITE);
+    char b[48];
+    if (v.calibrating) {
+      centered(f, "Gire o aparelho em 8", 80, 2, 1, kSel);
+      centered(f, "em todas as direcoes", 100, 2, 1, kText);
+      const int16_t bx = 30, by = 132, bw = SCREEN_W - 60, bh = 22;
+      f.drawRect(bx, by, bw, bh, kGrey);
+      int16_t fw = (int16_t)((bw - 4) * v.calPct / 100);
+      if (fw > 0) f.fillRect(bx + 2, by + 2, fw, bh - 4, kSel);
+      snprintf(b, sizeof b, "%u%%  (%lu amostras)", v.calPct, (unsigned long)v.calSamples);
+      centered(f, b, 172, 2, 1, kText);
+      centered(f, "Clique = cancelar", 214, 2, 1, kGrey);
+    } else {
+      centered(f, v.calSuccess ? "Calibracao salva!" : "Falhou - gire mais", 115, 4, 1,
+               v.calSuccess ? kGreen : kRed);
+      snprintf(b, sizeof b, "%lu amostras", (unsigned long)v.calSamples);
+      centered(f, b, 152, 2, 1, kText);
+      centered(f, "Clique = voltar", 214, 2, 1, kGrey);
+    }
+    return;
+  }
   back(f, cursor == 0);
-  char b[40];
+  char b[48];
   if (v.editing == 1) {
     snprintf(b, sizeof b, "ID: [%c][%c]  (editando %u/2)", v.id[0], v.id[1] ? v.id[1] : ' ',
              v.idPos + 1);
   } else {
     snprintf(b, sizeof b, "ID: %s", v.id);
   }
-  row(f, 36, b, cursor == 1);
+  row(f, 30, b, cursor == 1, kText, 28);
   snprintf(b, sizeof b, "Brilho: %u%%%s", v.brightness, v.editing == 2 ? "  < girar >" : "");
-  row(f, 72, b, cursor == 2);
+  row(f, 58, b, cursor == 2, kText, 28);
   snprintf(b, sizeof b, "Volume: %u%%%s", v.volume, v.editing == 3 ? "  < girar >" : "");
-  row(f, 108, b, cursor == 3);
-  row(f, 144, "Canal: 921,15 MHz (fixo)", cursor == 4, kGrey);
-  if (v.idConflict) centered(f, "ID repetido! Mude o ID", 210, 2, 1, kRed);
+  row(f, 86, b, cursor == 3, kText, 28);
+  snprintf(b, sizeof b, "Declinacao: %+.1f deg%s", v.declination,
+           v.editing == 4 ? " < girar >" : "");
+  row(f, 114, b, cursor == 4, kText, 28);
+  snprintf(b, sizeof b, "Calibrar bussola (%s)",
+           !v.compassOk ? "--" : (v.compassCalibrated ? "ok" : "nao cal."));
+  row(f, 142, b, cursor == 5, v.compassOk ? kText : kGrey, 28);
+  row(f, 170, "Canal: 921,15 MHz (fixo)", cursor == 6, kGrey, 28);
+  if (v.idConflict) centered(f, "ID repetido! Mude o ID", 220, 2, 1, kRed);
 }
 
 void drawOverlay(TFT_eSprite& f, Overlay o, const SharedState& s, uint8_t left, uint32_t now) {

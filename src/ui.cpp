@@ -10,6 +10,7 @@
 #include "audio.h"
 #include "audio_cues.h"
 #include "cc1101.h"
+#include "imu.h"
 #include "input.h"
 #include "input_logic.h"
 #include "keyboard.h"
@@ -81,7 +82,7 @@ uint8_t itemCount(Screen s) {
       return (e.mine && e.status == MsgStatus::Failed) ? 2 : 1;
     }
     case Screen::Keyboard: return (uint8_t)(1 + gKeyboard.keyCount());
-    case Screen::Settings: return 5;
+    case Screen::Settings: return 7;
     default: return 1;  // só "Voltar"
   }
 }
@@ -164,6 +165,7 @@ void applyBrightness(bool on) { displaySetBrightness(on ? gSetView.brightness : 
 void saveSettings() {
   gSet->brightness = brightnessRawFromPct(gSetView.brightness);
   gSet->volume = gSetView.volume;
+  gSet->magDeclination = gSetView.declination;
   settingsSave(*gSet);
 }
 
@@ -180,6 +182,22 @@ char nextIdChar(char c, int8_t d) {
 
 void onSettingsInput(int8_t d, Gesture g, uint32_t now) {
   ui::SettingsView& v = gSetView;
+  if (v.calibrating) {
+    if (g == Gesture::Click) {
+      imuCancelCompassCal();
+      v.calibrating = false;
+      v.calDone = false;
+      gDirty = true;
+    }
+    return;
+  }
+  if (v.calDone) {
+    if (g == Gesture::Click) {
+      v.calDone = false;
+      gDirty = true;
+    }
+    return;
+  }
   if (v.editing == 1) {
     if (d) v.id[v.idPos] = nextIdChar(v.id[v.idPos], d);
     if (g == Gesture::Click) {
@@ -218,6 +236,20 @@ void onSettingsInput(int8_t d, Gesture g, uint32_t now) {
     gDirty = true;
     return;
   }
+  if (v.editing == 4) {
+    if (d) {
+      v.declination += d * 0.5f;
+      if (v.declination < -45.0f) v.declination = -45.0f;
+      if (v.declination > 45.0f) v.declination = 45.0f;
+      imuSetDeclination(v.declination);
+    }
+    if (g == Gesture::Click) {
+      v.editing = -1;
+      saveSettings();
+    }
+    gDirty = true;
+    return;
+  }
   if (d) gCursor.move(d);
   if (g == Gesture::Click) {
     switch (gCursor.index()) {
@@ -229,10 +261,21 @@ void onSettingsInput(int8_t d, Gesture g, uint32_t now) {
         break;
       case 2: v.editing = 2; break;
       case 3: v.editing = 3; break;
+      case 4: v.editing = 4; break;
+      case 5:
+        if (imuStartCompassCal()) {
+          v.calibrating = true;
+          v.calDone = false;
+          v.calSuccess = false;
+          v.calPct = 0;
+          v.calSamples = 0;
+        } else {
+          banner("Bussola indisponivel", now, 2000);
+        }
+        break;
       default: break;  // canal: só leitura
     }
   }
-  (void)now;
   gDirty = true;
 }
 
@@ -275,8 +318,11 @@ void onScreenInput(int8_t d, Gesture g, uint32_t now) {
         memcpy(gSetView.id, gSet->id, sizeof gSetView.id);
         gSetView.brightness = brightnessPctFromRaw(gSet->brightness);
         gSetView.volume = (uint8_t)((gSet->volume + 5) / 10 * 10);
+        gSetView.declination = gSet->magDeclination;
         gSetView.editing = -1;
         gSetView.restarting = false;
+        gSetView.calibrating = false;
+        gSetView.calDone = false;
       }
       if (kTargets[i] == Screen::Scanner) gScanner.reset();
       push(kTargets[i]);
@@ -406,6 +452,8 @@ void draw(const SharedState& s, uint32_t now) {
       case Screen::Gps: ui::drawGps(f, s); break;
       case Screen::Settings:
         gSetView.idConflict = s.idConflict;
+        gSetView.compassOk = s.compassOk;
+        gSetView.compassCalibrated = s.compassCalibrated;
         ui::drawSettings(f, gSetView, c);
         break;
       case Screen::Map: gMapPending = mapDraw(f, s); break;
@@ -505,11 +553,37 @@ void uiTask(void*) {
     flushRetries();
 
     // Tela acesa/apagada
+    if (gSetView.calibrating) {
+      gWake.wake(now);  // mantém tela acesa durante calibração da bússola
+      uint8_t pct = 0;
+      uint32_t samples = 0;
+      bool done = false, ok = false;
+      MagCal calOut{};
+      const bool active = imuCompassCalStatus(pct, samples, done, ok, calOut);
+      if (pct != gSetView.calPct || samples != gSetView.calSamples) {
+        gSetView.calPct = pct;
+        gSetView.calSamples = samples;
+        gDirty = true;
+      }
+      if (!active && done) {
+        gSetView.calibrating = false;
+        gSetView.calDone = true;
+        gSetView.calSuccess = ok;
+        if (ok) {
+          gSet->magCal = calOut;
+          settingsSave(*gSet);
+        }
+        gDirty = true;
+      }
+    }
     gWake.tick(now, gOverlay.active());
     bool on = gWake.screenOn();
     if (on != gScreenWasOn) {
       applyBrightness(on);
       gScreenWasOn = on;
+      stateLock();
+      state().tftOn = on;
+      stateUnlock();
       gDirty = true;
     }
 

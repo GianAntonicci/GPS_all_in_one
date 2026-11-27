@@ -1,8 +1,9 @@
 #include "imu.h"
 
 #include <Arduino.h>
-#include <I2Cdev.h>
-#include <MPU6050.h>
+#include <ICM_20948.h>
+#include <Wire.h>
+#include <atomic>
 #include "config.h"
 #include "fall_detector.h"
 #include "i2c_bus.h"
@@ -11,153 +12,356 @@
 
 namespace {
 
-constexpr uint8_t kMpuAddr = 0x68;
-constexpr float kAccelLsbPerG = 4096.0f;    // ±8 g (MPU6050_ACCEL_FS_8)
-constexpr uint32_t kSampleMs = 20;          // 50 Hz durante movimento/queda
+constexpr uint32_t kFallSampleMs = 20;      // 50 Hz durante movimento/queda
+constexpr uint32_t kCompassPollMs = 50;     // 20 Hz com TFT aceso / calibração
+constexpr uint32_t kIdleWakeMs = 5000;      // timeout de sono (pronto para sensores periódicos)
 constexpr uint32_t kWakeCooldownMs = 1000;  // evita flood de uiWakeScreen em movimento contínuo
-constexpr uint8_t kMotionThr = 20;          // ~40 mg (2 mg/LSB); ajustar no hardware
-constexpr uint8_t kMotionDur = 2;           // 2 ms; ajustar no hardware
+constexpr uint32_t kCalDurationMs = 20000;  // 20 s girando em 8
+constexpr uint8_t kWomThreshold = 15;       // ~60 mg (4 mg/LSB); ajustar no hardware
 constexpr uint8_t kMaxReadErrors = 15;      // 300 ms de falhas seguidas no I2C → aborta amostragem
 
 TaskHandle_t gImuTask = nullptr;
-MPU6050 gMpu(kMpuAddr);
+ICM_20948_I2C gIcm;
+bool gMagOk = false;
+uint8_t gIcmAddr = 0;
+
+// Estado de calibração compartilhado entre UI e task IMU (protegido por stateLock()).
+MagCal gCal{};
+float gDeclination = MAG_DECLINATION_DEFAULT;
+bool gCalActive = false;
+bool gCalDone = false;
+bool gCalSuccess = false;
+uint32_t gCalStartMs = 0;
+uint8_t gCalPct = 0;
+uint32_t gCalSamples = 0;
+MagCalibrator gCalibrator;
+
+std::atomic<bool> gMotionIrq{false};
 
 void IRAM_ATTR onMotionIsr() {
+  gMotionIrq.store(true, std::memory_order_relaxed);
   BaseType_t woken = pdFALSE;
   if (gImuTask) vTaskNotifyGiveFromISR(gImuTask, &woken);
   if (woken) portYIELD_FROM_ISR();
 }
 
-void setImuOk(bool ok) {
+void setImuStatus(bool ok, uint8_t addr, bool magOk) {
   stateLock();
-  state().imuOk = ok;
+  SharedState& s = state();
+  s.imuOk = ok;
+  s.imuAddr = addr;
+  s.compassOk = ok && magOk;
+  s.compassCalibrated = gCal.valid;
+  s.magDeclination = gDeclination;
+  stateRefreshHeading(s);
   stateUnlock();
 }
 
-// Lê os 6 bytes de aceleração verificando o retorno do I2C: evita reutilizar buffer antigo
-// em caso de NACK/desconexão (o que poderia simular 1 g imóvel e disparar SOS falso).
-bool readAccel(int16_t& ax, int16_t& ay, int16_t& az) {
-  uint8_t buf[6] = {};
+bool tryInitIcm(bool ad0Val, uint8_t addr) {
   i2cLock();
-  const int8_t n = I2Cdev::readBytes(kMpuAddr, MPU6050_RA_ACCEL_XOUT_H, 6, buf);
-  i2cUnlock();
-  if (n != 6) return false;
-  ax = (int16_t)(((int16_t)buf[0] << 8) | buf[1]);
-  ay = (int16_t)(((int16_t)buf[2] << 8) | buf[3]);
-  az = (int16_t)(((int16_t)buf[4] << 8) | buf[5]);
-  return true;
-}
-
-bool configureMpu() {
-  i2cLock();
-  gMpu.initialize();
-  const bool ok = gMpu.testConnection();
+  gIcm.begin(Wire, ad0Val);
+  const bool ok = (gIcm.status == ICM_20948_Stat_Ok);
   if (!ok) {
     i2cUnlock();
     return false;
   }
-  gMpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_8);
-  gMpu.setStandbyXGyroEnabled(true);
-  gMpu.setStandbyYGyroEnabled(true);
-  gMpu.setStandbyZGyroEnabled(true);
-  gMpu.setTempSensorEnabled(false);
 
-  // Filtro passa-alta (5 Hz) para o detector de movimento por hardware ignorar a gravidade.
-  gMpu.setDHPFMode(MPU6050_DHPF_5);
-  gMpu.setMotionDetectionThreshold(kMotionThr);
-  gMpu.setMotionDetectionDuration(kMotionDur);
-  gMpu.setInterruptMode(0);          // ativo alto
-  gMpu.setInterruptDrive(0);         // push-pull
-  gMpu.setInterruptLatch(true);      // mantém nível até leitura de INT_STATUS
-  gMpu.setInterruptLatchClear(false);
-  gMpu.setIntMotionEnabled(true);
+  gIcm.swReset();
+  vTaskDelay(pdMS_TO_TICKS(20));
+  gIcm.sleep(false);
+  gIcm.lowPower(false);
+
+  // Acelerômetro ±8 g (mede impactos > 3 g sem saturar em 4 g).
+  ICM_20948_fss_t fss{};
+  fss.a = gpm8;
+  fss.g = dps250;
+  gIcm.setFullScale(ICM_20948_Internal_Acc, fss);
+
+  // Magnetômetro interno AK09916 via I2C master do ICM-20948.
+  gMagOk = (gIcm.startupMagnetometer() == ICM_20948_Stat_Ok);
+  if (!gMagOk) {
+    LOGW("IMU: AK09916 nao respondeu no ICM-20948 (bussola indisponivel)");
+  }
+
+  // Wake-on-Motion via pino INT (GPIO 7): ativo alto, push-pull, latched até clearInterrupts().
+  gIcm.cfgIntActiveLow(false);
+  gIcm.cfgIntOpenDrain(false);
+  gIcm.cfgIntLatch(true);
+  gIcm.WOMThreshold(kWomThreshold);
+  gIcm.WOMLogic(1, 1);  // habilita WoM comparando amostra atual com a anterior
+  gIcm.intEnableWOM(true);
+  gIcm.clearInterrupts();
   i2cUnlock();
+
+  gIcmAddr = addr;
   return true;
+}
+
+bool configureIcm() {
+  if (tryInitIcm(false, I2C_ADDR_ICM_PRIMARY)) return true;
+  if (tryInitIcm(true, I2C_ADDR_ICM_ALT)) return true;
+  return false;
+}
+
+// Lê aceleração (em g) e magnetômetro (em uT, alinhado aos eixos do acelerômetro).
+bool readIcm(float& axG, float& ayG, float& azG, float& mxUt, float& myUt, float& mzUt,
+             bool& hasMag) {
+  i2cLock();
+  gIcm.getAGMT();
+  const bool ok = (gIcm.status == ICM_20948_Stat_Ok);
+  if (ok) {
+    // SparkFun ICM_20948 retorna aceleração em mg -> converte para g.
+    axG = gIcm.accX() * 0.001f;
+    ayG = gIcm.accY() * 0.001f;
+    azG = gIcm.accZ() * 0.001f;
+    // No ICM-20948, o AK09916 tem eixos Y e Z invertidos em relação ao acelerômetro.
+    mxUt = gIcm.magX();
+    myUt = -gIcm.magY();
+    mzUt = -gIcm.magZ();
+    hasMag = gMagOk;
+  }
+  i2cUnlock();
+  return ok;
+}
+
+void processCompassSample(float axG, float ayG, float azG, float mxUt, float myUt, float mzUt,
+                          uint32_t now) {
+  bool calActive = false;
+  MagCal calCopy{};
+  float declCopy = MAG_DECLINATION_DEFAULT;
+
+  stateLock();
+  calActive = gCalActive;
+  calCopy = gCal;
+  declCopy = gDeclination;
+  stateUnlock();
+
+  if (calActive) {
+    gCalibrator.addSample(mxUt, myUt, mzUt);
+    const uint32_t elapsed = now - gCalStartMs;
+    uint8_t pct = (elapsed >= kCalDurationMs) ? 100 : (uint8_t)((elapsed * 100u) / kCalDurationMs);
+    if (elapsed >= kCalDurationMs) {
+      MagCal newCal{};
+      const bool ok = gCalibrator.finish(newCal);
+      stateLock();
+      gCalActive = false;
+      gCalDone = true;
+      gCalSuccess = ok;
+      gCalPct = 100;
+      gCalSamples = gCalibrator.sampleCount();
+      if (ok) {
+        gCal = newCal;
+        state().compassCalibrated = true;
+        LOGI("Bussola calibrada (%lu amostras): off(%.1f,%.1f,%.1f) esc(%.2f,%.2f,%.2f)",
+             (unsigned long)gCalSamples, newCal.offsetX, newCal.offsetY, newCal.offsetZ,
+             newCal.scaleX, newCal.scaleY, newCal.scaleZ);
+      } else {
+        LOGW("Calibracao da bussola falhou (%lu amostras; gire mais o aparelho)",
+             (unsigned long)gCalSamples);
+      }
+      stateRefreshHeading(state());
+      stateUnlock();
+      return;
+    }
+    stateLock();
+    gCalPct = pct;
+    gCalSamples = gCalibrator.sampleCount();
+    stateUnlock();
+    return;
+  }
+
+  float cx = mxUt, cy = myUt, cz = mzUt;
+  applyMagCal(calCopy, mxUt, myUt, mzUt, cx, cy, cz);
+  float heading = 0.0f;
+  if (tiltCompensatedHeading(axG, ayG, azG, cx, cy, cz, declCopy, heading)) {
+    stateLock();
+    SharedState& s = state();
+    s.compassOk = true;
+    s.compassDeg = heading;
+    s.compassCalibrated = calCopy.valid;
+    s.magDeclination = declCopy;
+    stateRefreshHeading(s);
+    stateUnlock();
+  }
 }
 
 void imuTask(void*) {
   // Anexa a ISR antes de habilitar/limpar o latch do INT para não perder borda no boot.
-  pinMode(PIN_MPU_INT, INPUT);
-  attachInterrupt(digitalPinToInterrupt(PIN_MPU_INT), onMotionIsr, RISING);
+  pinMode(PIN_IMU_INT, INPUT);
+  attachInterrupt(digitalPinToInterrupt(PIN_IMU_INT), onMotionIsr, RISING);
 
-  if (!configureMpu()) {
-    detachInterrupt(digitalPinToInterrupt(PIN_MPU_INT));
-    LOGE("IMU: MPU6050 nao respondeu em 0x%02X", kMpuAddr);
-    setImuOk(false);
+  const bool icmReady = configureIcm();
+  if (!icmReady) {
+    detachInterrupt(digitalPinToInterrupt(PIN_IMU_INT));
+    LOGE("IMU: ICM-20948 nao respondeu em 0x%02X nem 0x%02X", I2C_ADDR_ICM_PRIMARY,
+         I2C_ADDR_ICM_ALT);
+    setImuStatus(false, 0, false);
     gImuTask = nullptr;
     vTaskDelete(nullptr);
     return;
   }
-  setImuOk(true);
-  LOGI("IMU: MPU6050 pronto (±8g, INT GPIO %d)", PIN_MPU_INT);
 
-  // Limpa latch inicial; se o pino já estiver alto após limpar/drenar, processa sem dormir.
+  setImuStatus(true, gIcmAddr, gMagOk);
+  LOGI("IMU: ICM-20948 pronto em 0x%02X (±8g, INT GPIO %d, mag=%s)", gIcmAddr, PIN_IMU_INT,
+       gMagOk ? "ok" : "ERRO");
+
   i2cLock();
-  (void)gMpu.getIntStatus();
+  gIcm.clearInterrupts();
   i2cUnlock();
+  gMotionIrq.store(false, std::memory_order_relaxed);
   (void)ulTaskNotifyTake(pdTRUE, 0);
-  bool waitForInt = (digitalRead(PIN_MPU_INT) == LOW);
 
   FallDetector detector;
   bool hasWoken = false;
   uint32_t lastWake = 0;
+  uint8_t consecErrors = 0;
+  uint32_t lastCompassRead = 0;
 
   for (;;) {
-    // Dorme em repouso: 0% CPU e zero tráfego I2C até o GPIO 7 disparar.
-    if (waitForInt) ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    waitForInt = true;
+    const uint32_t now = millis();
 
-    i2cLock();
-    (void)gMpu.getIntStatus();  // limpa latch do INT
-    i2cUnlock();
+    // Verifica se houve movimento por hardware (WoM no GPIO 7).
+    const bool motionTriggered =
+        gMotionIrq.exchange(false, std::memory_order_relaxed) || (digitalRead(PIN_IMU_INT) == HIGH);
+    if (motionTriggered) {
+      i2cLock();
+      gIcm.clearInterrupts();
+      i2cUnlock();
 
-    uint32_t now = millis();
-    if (!hasWoken || (uint32_t)(now - lastWake) >= kWakeCooldownMs) {
-      uiWakeScreen();
-      lastWake = now;
-      hasWoken = true;
+      if (!hasWoken || (uint32_t)(now - lastWake) >= kWakeCooldownMs) {
+        uiWakeScreen();
+        lastWake = now;
+        hasWoken = true;
+      }
+      detector.onMotionWake(now);
     }
 
-    detector.onMotionWake(now);
-    uint8_t consecErrors = 0;
-    while (detector.wantsSampling()) {
-      int16_t ax = 0, ay = 0, az = 0;
-      if (!readAccel(ax, ay, az)) {
+    stateLock();
+    const bool needCompass = gMagOk && (state().tftOn || gCalActive);
+    stateUnlock();
+
+    if (detector.wantsSampling()) {
+      float ax = 0, ay = 0, az = 0, mx = 0, my = 0, mz = 0;
+      bool hasMag = false;
+      if (!readIcm(ax, ay, az, mx, my, mz, hasMag)) {
         if (++consecErrors >= kMaxReadErrors) {
           LOGE("IMU: falha consecutiva de leitura I2C, abortando amostragem");
-          setImuOk(false);
+          setImuStatus(false, gIcmAddr, false);
           detector.reset();
-          break;
         }
-        vTaskDelay(pdMS_TO_TICKS(kSampleMs));
+        vTaskDelay(pdMS_TO_TICKS(kFallSampleMs));
         continue;
       }
       if (consecErrors > 0) {
         consecErrors = 0;
-        setImuOk(true);
+        setImuStatus(true, gIcmAddr, gMagOk);
       }
 
-      const FallEvent ev = detector.update(ax / kAccelLsbPerG, ay / kAccelLsbPerG,
-                                           az / kAccelLsbPerG, millis());
+      const uint32_t tNow = millis();
+      const FallEvent ev = detector.update(ax, ay, az, tNow);
       if (ev == FallEvent::SosCountdown) {
         LOGW("IMU: queda detectada, iniciando contagem SOS");
         uiRequestSosCountdown();
       }
-      vTaskDelay(pdMS_TO_TICKS(kSampleMs));
+      if (hasMag && (needCompass && (tNow - lastCompassRead >= kCompassPollMs))) {
+        processCompassSample(ax, ay, az, mx, my, mz, tNow);
+        lastCompassRead = tNow;
+      }
+
+      if (!detector.wantsSampling()) {
+        i2cLock();
+        gIcm.clearInterrupts();
+        i2cUnlock();
+      }
+      vTaskDelay(pdMS_TO_TICKS(kFallSampleMs));
+      continue;
     }
 
-    // Limpa latch e drena notificação residual; se PIN_MPU_INT voltou a subir na janela entre
-    // getIntStatus() e ulTaskNotifyTake(0), evita travar em RISING-edge latched HIGH.
+    if (needCompass) {
+      float ax = 0, ay = 0, az = 0, mx = 0, my = 0, mz = 0;
+      bool hasMag = false;
+      if (readIcm(ax, ay, az, mx, my, mz, hasMag)) {
+        if (consecErrors > 0) {
+          consecErrors = 0;
+          setImuStatus(true, gIcmAddr, gMagOk);
+        }
+        if (hasMag) processCompassSample(ax, ay, az, mx, my, mz, millis());
+      } else if (++consecErrors >= kMaxReadErrors) {
+        setImuStatus(false, gIcmAddr, false);
+      }
+      (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kCompassPollMs));
+      continue;
+    }
+
+    // TFT apagado e sem suspeita de queda: dorme aguardando INT no GPIO 7.
     i2cLock();
-    (void)gMpu.getIntStatus();
+    gIcm.clearInterrupts();
     i2cUnlock();
-    (void)ulTaskNotifyTake(pdTRUE, 0);
-    if (digitalRead(PIN_MPU_INT) == HIGH) waitForInt = false;
+    (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(kIdleWakeMs));
   }
 }
 
 }  // namespace
 
+void imuConfigureCompass(const MagCal& cal, float declinationDeg) {
+  stateLock();
+  gCal = cal;
+  gDeclination = declinationDeg;
+  SharedState& s = state();
+  s.compassCalibrated = cal.valid;
+  s.magDeclination = declinationDeg;
+  stateRefreshHeading(s);
+  stateUnlock();
+}
+
+void imuSetDeclination(float declinationDeg) {
+  stateLock();
+  gDeclination = declinationDeg;
+  state().magDeclination = declinationDeg;
+  stateUnlock();
+}
+
+bool imuStartCompassCal() {
+  stateLock();
+  if (!state().imuOk || !gMagOk) {
+    stateUnlock();
+    return false;
+  }
+  gCalibrator.reset();
+  gCalStartMs = millis();
+  gCalActive = true;
+  gCalDone = false;
+  gCalSuccess = false;
+  gCalPct = 0;
+  gCalSamples = 0;
+  stateUnlock();
+  if (gImuTask) xTaskNotifyGive(gImuTask);
+  return true;
+}
+
+void imuCancelCompassCal() {
+  stateLock();
+  gCalActive = false;
+  gCalDone = false;
+  gCalSuccess = false;
+  gCalPct = 0;
+  gCalSamples = 0;
+  stateUnlock();
+}
+
+bool imuCompassCalStatus(uint8_t& progressPct, uint32_t& samples, bool& done, bool& success,
+                         MagCal& calOut) {
+  stateLock();
+  const bool active = gCalActive;
+  progressPct = gCalPct;
+  samples = gCalSamples;
+  done = gCalDone;
+  success = gCalSuccess;
+  calOut = gCal;
+  stateUnlock();
+  return active;
+}
+
 void imuStart() {
-  xTaskCreatePinnedToCore(imuTask, "imu", 4096, nullptr, 1, &gImuTask, 1);
+  xTaskCreatePinnedToCore(imuTask, "imu", 6144, nullptr, 1, &gImuTask, 1);
 }

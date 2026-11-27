@@ -27,9 +27,10 @@ void printStatus() {
   SharedState s = state();
   stateUnlock();
   uint32_t now = millis();
-  Serial.printf("[STATUS] lora=%s imu=%s cc1101=%s sos=%s amigoSOS=%s%s\n",
-                s.loraOk ? "ok" : "ERRO", s.imuOk ? "ok" : "ERRO", s.cc1101Ok ? "ok" : "ERRO",
-                sosName(s.mySos), s.peerSos ? "SIM" : "nao",
+  Serial.printf("[STATUS] lora=%s imu=%s(0x%02X) mag=%s cc1101=%s sos=%s amigoSOS=%s%s\n",
+                s.loraOk ? "ok" : "ERRO", s.imuOk ? "ok" : "ERRO", s.imuAddr,
+                s.compassOk ? (s.compassCalibrated ? "cal" : "nao-cal") : "ERRO",
+                s.cc1101Ok ? "ok" : "ERRO", sosName(s.mySos), s.peerSos ? "SIM" : "nao",
                 s.idConflict ? " ID-DUPLICADO" : "");
   if (s.peerRxMs)
     Serial.printf("[STATUS] ultimo pacote do amigo ha %lu s, rssi %s%d\n",
@@ -41,12 +42,30 @@ void printStatus() {
   if (s.peerKnown && s.myPosKnown) {
     double d = distanceM(s.lat, s.lon, s.peerLat, s.peerLon);
     double b = bearingDeg(s.lat, s.lon, s.peerLat, s.peerLon);
-    if (s.courseKnown) {
-      Serial.printf("[STATUS] amigo a %.0f m, rumo %.0f graus (%+.0f em relacao ao meu rumo%s)\n",
-                    d, b, relativeBearingDeg(b, s.courseDeg), s.courseStale ? ", antigo" : "");
+    if (s.headingKnown) {
+      Serial.printf("[STATUS] amigo a %.0f m, rumo %.0f graus (%+.0f em relacao ao meu rumo [%s])\n",
+                    d, b, relativeBearingDeg(b, s.headingDeg), headingSourceName(s.headingSource));
     } else {
       Serial.printf("[STATUS] amigo a %.0f m, rumo %.0f graus\n", d, b);
     }
+  }
+}
+
+void printSensors() {
+  stateLock();
+  SharedState s = state();
+  stateUnlock();
+  Serial.printf("[SENSORS] ICM-20948: %s (addr=0x%02X) mag=%s cal=%s decl=%+.1f deg\n",
+                s.imuOk ? "ok" : "AUSENTE", s.imuAddr, s.compassOk ? "ok" : "AUSENTE",
+                s.compassCalibrated ? "sim" : "nao", s.magDeclination);
+  if (s.compassOk) {
+    Serial.printf("[SENSORS] bussola: %.1f graus\n", s.compassDeg);
+  }
+  if (s.headingKnown) {
+    Serial.printf("[SENSORS] rumo atual: %.1f graus (fonte: %s)\n", s.headingDeg,
+                  headingSourceName(s.headingSource));
+  } else {
+    Serial.println("[SENSORS] rumo atual: -- (fonte: nenhum)");
   }
 }
 
@@ -108,11 +127,13 @@ void handleLine(char* line) {
     send(c);
   } else if (strcmp(line, "status") == 0) {
     printStatus();
+  } else if (strcmp(line, "sensors") == 0) {
+    printSensors();
   } else if (strcmp(line, "fall") == 0) {
     Serial.println("[IMU] simulando queda (contagem SOS)");
     uiRequestSosCountdown();
   } else if (*line) {
-    Serial.println("Comandos: ping | msg <texto> | pos <lat> <lon> | sos [<lat> <lon>] | cancel | vi | gps | fall | status");
+    Serial.println("Comandos: ping | msg <texto> | pos <lat> <lon> | sos [<lat> <lon>] | cancel | vi | gps | sensors | fall | status");
   }
 }
 
