@@ -55,6 +55,30 @@ void test_pos_roundtrip_negative() {
   TEST_ASSERT_DOUBLE_WITHIN(0.000005, -46.63331, q.lon);
   TEST_ASSERT_EQUAL_INT32(760, q.alt);
   TEST_ASSERT_EQUAL_UINT8(87, q.bat);
+  TEST_ASSERT_FALSE(q.hasBaroAlt);
+}
+
+void test_pos_with_baro_alt_roundtrip() {
+  Packet p{};
+  p.type = PktType::POS;
+  strcpy(p.id, "A1");
+  p.seq = 12;
+  p.lat = -23.55052;
+  p.lon = -46.63331;
+  p.alt = 755;
+  p.bat = 91;
+  p.hasBaroAlt = true;
+  p.baroAlt = 762;
+  char buf[FRAME_MAX];
+  size_t n = enc(p, buf);
+  TEST_ASSERT_TRUE(n > 0);
+  Packet q{};
+  TEST_ASSERT_TRUE(protoDecode(buf, n - 1, q));
+  TEST_ASSERT_EQUAL(PktType::POS, q.type);
+  TEST_ASSERT_EQUAL_INT32(755, q.alt);
+  TEST_ASSERT_EQUAL_UINT8(91, q.bat);
+  TEST_ASSERT_TRUE(q.hasBaroAlt);
+  TEST_ASSERT_EQUAL_INT32(762, q.baroAlt);
 }
 
 void test_msg_with_commas_roundtrip() {
@@ -217,6 +241,7 @@ int main(int, char**) {
   RUN_TEST(test_checksum_known);
   RUN_TEST(test_encode_ping_exact);
   RUN_TEST(test_pos_roundtrip_negative);
+  RUN_TEST(test_pos_with_baro_alt_roundtrip);
   RUN_TEST(test_msg_with_commas_roundtrip);
   RUN_TEST(test_all_types_roundtrip);
   RUN_TEST(test_decode_rejects_bad_checksum);

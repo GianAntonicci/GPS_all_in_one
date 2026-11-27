@@ -71,6 +71,7 @@ void gpsPoll(uint32_t now) {
   SharedState& s = state();
   s.gpsFix = fix;
   s.sats = gGps.satellites.isValid() ? (uint8_t)gGps.satellites.value() : 0;
+  s.gpsHdop = gGps.hdop.isValid() ? (float)gGps.hdop.hdop() : 99.9f;
   if (fix) {
     s.lat = gGps.location.lat();
     s.lon = gGps.location.lng();

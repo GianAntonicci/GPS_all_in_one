@@ -18,8 +18,10 @@ struct Packet {
   uint8_t seq;
   char text[MSG_MAX_LEN + 1];   // MSG
   double lat, lon;              // POS, SOS
-  int32_t alt;                  // POS (m)
+  int32_t alt;                  // POS (m, GPS)
   uint8_t bat;                  // POS, SOS (%)
+  bool hasBaroAlt;              // POS: campo opcional 8 (altitude barométrica)
+  int32_t baroAlt;              // POS (m, barométrica)
   uint8_t ackSeq;               // ACK: seq confirmado; SEEN: seq do SOS que foi visto
 };
 

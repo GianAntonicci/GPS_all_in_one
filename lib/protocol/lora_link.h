@@ -44,7 +44,8 @@ class Link {
 
   int sendMsg(const char* text, uint32_t now);  // seq, ou -1 se já há MSG/PING pendente
   int sendPing(uint32_t now);
-  void sendPos(double lat, double lon, int32_t alt, uint8_t bat, uint32_t now);
+  void sendPos(double lat, double lon, int32_t alt, uint8_t bat, uint32_t now,
+               bool hasBaroAlt = false, int32_t baroAlt = 0);
 
   // SOS em dois níveis (spec): Sending -> Received (ACK) -> Seen (SEEN do amigo).
   void startSos(double lat, double lon, uint8_t bat, uint32_t now);

@@ -53,12 +53,15 @@ int Link::sendPing(uint32_t now) {
   return startReliable(make(PktType::PING), now);
 }
 
-void Link::sendPos(double lat, double lon, int32_t alt, uint8_t bat, uint32_t) {
+void Link::sendPos(double lat, double lon, int32_t alt, uint8_t bat, uint32_t, bool hasBaroAlt,
+                   int32_t baroAlt) {
   Packet p = make(PktType::POS);
   p.lat = lat;
   p.lon = lon;
   p.alt = alt;
   p.bat = bat;
+  p.hasBaroAlt = hasBaroAlt;
+  p.baroAlt = baroAlt;
   transmit(p);
 }
 

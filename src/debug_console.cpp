@@ -27,9 +27,10 @@ void printStatus() {
   SharedState s = state();
   stateUnlock();
   uint32_t now = millis();
-  Serial.printf("[STATUS] lora=%s imu=%s(0x%02X) mag=%s cc1101=%s sos=%s amigoSOS=%s%s\n",
+  Serial.printf("[STATUS] lora=%s imu=%s(0x%02X) mag=%s bme=%s(0x%02X) cc1101=%s sos=%s amigoSOS=%s%s\n",
                 s.loraOk ? "ok" : "ERRO", s.imuOk ? "ok" : "ERRO", s.imuAddr,
                 s.compassOk ? (s.compassCalibrated ? "cal" : "nao-cal") : "ERRO",
+                s.bmeOk ? "ok" : "ERRO", s.bmeAddr,
                 s.cc1101Ok ? "ok" : "ERRO", sosName(s.mySos), s.peerSos ? "SIM" : "nao",
                 s.idConflict ? " ID-DUPLICADO" : "");
   if (s.peerRxMs)
@@ -60,6 +61,18 @@ void printSensors() {
                 s.compassCalibrated ? "sim" : "nao", s.magDeclination);
   if (s.compassOk) {
     Serial.printf("[SENSORS] bussola: %.1f graus\n", s.compassDeg);
+  }
+  Serial.printf("[SENSORS] BME280: %s (addr=0x%02X)\n", s.bmeOk ? "ok" : "AUSENTE", s.bmeAddr);
+  if (s.bmeOk) {
+    Serial.printf("[SENSORS] temp=%.1f C umid=%.1f%% press=%.1f hPa tend=%s", s.tempC,
+                  s.humidityPct, s.pressureHpa, pressureTrendSymbol(s.pressureTrend));
+    if (s.hasPressureDelta3h) Serial.printf(" (d3h=%+.1f hPa)", s.pressureDelta3h);
+    if (s.pressureRapidDrop) Serial.print(" [ALERTA: queda rapida]");
+    Serial.println();
+    if (s.baroAltValid) {
+      Serial.printf("[SENSORS] alt baro: %.1f m (%s)\n", s.baroAltM,
+                    s.baroCalibrated ? "calibrada pelo GPS" : "pressao padrao");
+    }
   }
   if (s.headingKnown) {
     Serial.printf("[SENSORS] rumo atual: %.1f graus (fonte: %s)\n", s.headingDeg,

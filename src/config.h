@@ -25,7 +25,7 @@
 #define SD_SPI_HZ     20000000
 #define TRACK_CAPACITY 20000  // pontos da trilha em PSRAM (~160 KB)
 
-// ---- I2C (OLED 0x3C, ICM-20948 0x68/0x69) ----
+// ---- I2C (OLED 0x3C, ICM-20948 0x68/0x69, BME280 0x76/0x77) ----
 #define PIN_I2C_SDA            8
 #define PIN_I2C_SCL            18
 #define PIN_IMU_INT            7
@@ -33,6 +33,8 @@
 #define I2C_ADDR_OLED          0x3C
 #define I2C_ADDR_ICM_PRIMARY   0x68
 #define I2C_ADDR_ICM_ALT       0x69
+#define I2C_ADDR_BME_PRIMARY   0x76
+#define I2C_ADDR_BME_ALT       0x77
 #define MAG_DECLINATION_DEFAULT (-21.5f)    // São Paulo (graus, negativo = Oeste)
 
 // ---- GPS NEO-6M (Serial1, lado ESP) ----

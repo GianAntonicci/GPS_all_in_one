@@ -106,8 +106,13 @@ size_t protoEncode(const Packet& p, char* out, size_t cap) {
       n = snprintf(body, sizeof body, "%s,%s,%u,%s", tn, p.id, p.seq, p.text);
       break;
     case PktType::POS:
-      n = snprintf(body, sizeof body, "%s,%s,%u,%.5f,%.5f,%ld,%u", tn, p.id, p.seq, p.lat, p.lon,
-                   (long)p.alt, p.bat);
+      if (p.hasBaroAlt) {
+        n = snprintf(body, sizeof body, "%s,%s,%u,%.5f,%.5f,%ld,%u,%ld", tn, p.id, p.seq, p.lat,
+                     p.lon, (long)p.alt, p.bat, (long)p.baroAlt);
+      } else {
+        n = snprintf(body, sizeof body, "%s,%s,%u,%.5f,%.5f,%ld,%u", tn, p.id, p.seq, p.lat, p.lon,
+                     (long)p.alt, p.bat);
+      }
       break;
     case PktType::ACK:
     case PktType::SEEN:
@@ -146,12 +151,12 @@ bool protoDecode(const char* line, size_t len, Packet& out) {
   if (protoChecksum(body, star - body) != (uint8_t)(h * 16 + l)) return false;
   if (memchr(body, '*', star - body) || memchr(body, '$', star - body)) return false;
 
-  // Divide em até 7 campos; o texto de MSG é o 4º campo e vai até o '*'.
-  const char* fb[7];
-  const char* fe[7];
+  // Divide em até 8 campos; o texto de MSG é o 4º campo e vai até o '*'.
+  const char* fb[8];
+  const char* fe[8];
   int nf = 0;
   const char* p = body;
-  while (nf < 7) {
+  while (nf < 8) {
     const char* c = (const char*)memchr(p, ',', star - p);
     fb[nf] = p;
     fe[nf] = c ? c : star;
@@ -203,7 +208,7 @@ bool protoDecode(const char* line, size_t len, Packet& out) {
       break;
     }
     case PktType::POS: {
-      if (nf != 7) return false;
+      if (nf != 7 && nf != 8) return false;
       long alt, bat;
       if (!parseDouble(fb[3], fe[3], -90, 90, r.lat)) return false;
       if (!parseDouble(fb[4], fe[4], -180, 180, r.lon)) return false;
@@ -211,6 +216,12 @@ bool protoDecode(const char* line, size_t len, Packet& out) {
       if (!parseLong(fb[6], fe[6], 0, 100, bat)) return false;
       r.alt = (int32_t)alt;
       r.bat = (uint8_t)bat;
+      if (nf == 8) {
+        long bAlt;
+        if (!parseLong(fb[7], fe[7], -10000, 100000, bAlt)) return false;
+        r.hasBaroAlt = true;
+        r.baroAlt = (int32_t)bAlt;
+      }
       break;
     }
     case PktType::ACK:

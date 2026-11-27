@@ -236,6 +236,28 @@ void drawFriend(TFT_eSprite& f, const SharedState& s, uint32_t now) {
   }
 }
 
+void drawTrendArrow(TFT_eSprite& f, int16_t x, int16_t y, PressureTrend t) {
+  const uint16_t col = (t == PressureTrend::Falling) ? kRed
+                       : (t == PressureTrend::Rising) ? kGreen
+                                                      : kText;
+  switch (t) {
+    case PressureTrend::Rising:
+      f.fillTriangle(x + 5, y + 2, x, y + 10, x + 10, y + 10, col);
+      f.fillRect(x + 4, y + 10, 3, 5, col);
+      break;
+    case PressureTrend::Falling:
+      f.fillRect(x + 4, y + 2, 3, 5, col);
+      f.fillTriangle(x + 5, y + 15, x, y + 7, x + 10, y + 7, col);
+      break;
+    case PressureTrend::Steady:
+      f.fillRect(x, y + 7, 6, 3, col);
+      f.fillTriangle(x + 11, y + 8, x + 6, y + 4, x + 6, y + 12, col);
+      break;
+    case PressureTrend::Unknown:
+      break;
+  }
+}
+
 void drawGps(TFT_eSprite& f, const SharedState& s) {
   f.fillSprite(kBg);
   back(f, true);
@@ -243,24 +265,28 @@ void drawGps(TFT_eSprite& f, const SharedState& s) {
   f.setTextSize(1);
   f.setTextColor(kText);
   f.setTextDatum(TL_DATUM);
-  char b[48];
-  int16_t y = 36;
-  auto line = [&](const char* t) {
+  char b[56];
+  int16_t y = 32;
+  auto line = [&](const char* t, uint16_t col = kText) {
+    f.setTextColor(col);
     f.drawString(t, 10, y);
-    y += 22;
+    y += 20;
   };
-  snprintf(b, sizeof b, "Fix: %s   Satelites: %u", s.gpsFix ? "sim" : "nao", s.sats);
+  snprintf(b, sizeof b, "Fix: %s  Sats: %u  HDOP: %.1f", s.gpsFix ? "sim" : "nao", s.sats,
+           s.gpsHdop < 50.0f ? s.gpsHdop : 0.0f);
   line(b);
   if (s.myPosKnown) {
-    snprintf(b, sizeof b, "%s", s.gpsFix ? "Posicao:" : "Ultima posicao:");
-    line(b);
-    snprintf(b, sizeof b, "  %.5f, %.5f", s.lat, s.lon);
+    snprintf(b, sizeof b, "%s %.5f, %.5f", s.gpsFix ? "Pos:" : "Ult:", s.lat, s.lon);
     line(b);
   } else {
-    line("Posicao: desconhecida");
-    y += 22;
+    line("Pos: desconhecida");
   }
-  snprintf(b, sizeof b, "Altitude %.0f m   Vel. %.1f km/h", s.altM, s.speedKmh);
+  if (s.bmeOk && s.baroAltValid) {
+    snprintf(b, sizeof b, "Alt %.0f m (%s)  Vel %.1f km/h", s.baroAltM,
+             s.baroCalibrated ? "baro" : "baro*", s.speedKmh);
+  } else {
+    snprintf(b, sizeof b, "Alt %.0f m (GPS)  Vel %.1f km/h", s.altM, s.speedKmh);
+  }
   line(b);
   if (s.headingKnown) {
     snprintf(b, sizeof b, "Rumo %.0f graus (%s)", s.headingDeg, headingSourceName(s.headingSource));
@@ -268,6 +294,18 @@ void drawGps(TFT_eSprite& f, const SharedState& s) {
     snprintf(b, sizeof b, "Rumo: --");
   }
   line(b);
+  if (s.bmeOk) {
+    snprintf(b, sizeof b, "Temp %.1f C  Umid %.0f%%  %.1f hPa", s.tempC, s.humidityPct,
+             s.pressureHpa);
+    const int16_t ty = y;
+    line(b);
+    drawTrendArrow(f, 14 + f.textWidth(b), ty, s.pressureTrend);
+  } else {
+    line("Temp --  Umid --  Pressao --", kGrey);
+  }
+  if (s.pressureRapidDrop) {
+    line("Queda rapida! Possivel mudanca tempo", kRed);
+  }
   if (s.timeValid) {
     const DateTime& t = s.localTime;
     snprintf(b, sizeof b, "%02u/%02u/%04u %02u:%02u:%02u (UTC-3)", t.day, t.month, t.year, t.hour,
@@ -278,7 +316,7 @@ void drawGps(TFT_eSprite& f, const SharedState& s) {
   line(b);
   snprintf(b, sizeof b, "Bateria %u%% (%lu mV)%s", s.batteryPct, (unsigned long)s.batteryMv,
            s.batteryLow ? " BAIXA" : "");
-  line(b);
+  line(b, s.batteryLow ? kRed : kText);
   fmtTrackStatus(b, sizeof b, s.sdOk, s.trackRecording, s.trackPoints, s.timeValid, s.gpsFix);
   line(b);
 }

@@ -4,6 +4,7 @@
 #include <ICM_20948.h>
 #include <Wire.h>
 #include <atomic>
+#include "bme.h"
 #include "config.h"
 #include "fall_detector.h"
 #include "i2c_bus.h"
@@ -186,6 +187,8 @@ void processCompassSample(float axG, float ayG, float azG, float mxUt, float myU
 }
 
 void imuTask(void*) {
+  const bool bmeReady = bmeBegin();
+
   // Anexa a ISR antes de habilitar/limpar o latch do INT para não perder borda no boot.
   pinMode(PIN_IMU_INT, INPUT);
   attachInterrupt(digitalPinToInterrupt(PIN_IMU_INT), onMotionIsr, RISING);
@@ -196,9 +199,16 @@ void imuTask(void*) {
     LOGE("IMU: ICM-20948 nao respondeu em 0x%02X nem 0x%02X", I2C_ADDR_ICM_PRIMARY,
          I2C_ADDR_ICM_ALT);
     setImuStatus(false, 0, false);
-    gImuTask = nullptr;
-    vTaskDelete(nullptr);
-    return;
+    if (!bmeReady) {
+      gImuTask = nullptr;
+      vTaskDelete(nullptr);
+      return;
+    }
+    // ICM ausente, mas BME280 presente: mantém apenas a leitura ambiental a cada 5 s.
+    for (;;) {
+      bmePoll(millis());
+      vTaskDelay(pdMS_TO_TICKS(kIdleWakeMs));
+    }
   }
 
   setImuStatus(true, gIcmAddr, gMagOk);
@@ -219,6 +229,7 @@ void imuTask(void*) {
 
   for (;;) {
     const uint32_t now = millis();
+    if (bmeReady) bmePoll(now);
 
     // Verifica se houve movimento por hardware (WoM no GPIO 7).
     const bool motionTriggered =
