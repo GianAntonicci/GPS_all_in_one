@@ -49,9 +49,7 @@ Bateria importa: gastar o mínimo enquanto ligados, e zero enquanto guardados.
   `-DBOARD_HAS_PSRAM`. TFT_eSPI configurado **só** por `build_flags`.
 - LLCC68 tem SFs menores que SX1262 → alcance limitado pelo rádio; antena
   e altura importam mais que o firmware.
-- Sem magnetômetro: direção vem do `gps.course`; parado, mantém o último
-  rumo (a seta pode ficar errada se o usuário girar parado — limitação
-  aceita, mostrar indicação "rumo antigo" na tela).
+- **Magnetômetro (atualizado 2026-11-27):** com a troca do MPU6050 pelo **ICM-20948** (AK09916 interno), o rumo usa `gps.course` em movimento (`>= 1,5 km/h` com fix) e a **bússola calibrada** com compensação de inclinação + declinação magnética quando parado (`< 1,5 km/h`) ou sem fix (removendo o aviso `"rumo antigo"`). Se a bússola não estiver calibrada ou o sensor estiver ausente, mantém o fallback de `gps.course` com `"rumo antigo"`.
 - Chave física corta a bateria (hardware). Firmware não implementa "desligar".
 
 ## Pinagem (aprovada)
@@ -63,8 +61,8 @@ Bateria importa: gastar o mínimo enquanto ligados, e zero enquanto guardados.
 | TFT RST | ligado ao EN (`TFT_RST=-1`) |
 | SD CS | 21 |
 | CC1101 CS | 47 (GDO0 não usado; RSSI lido via SPI) |
-| I2C SDA / SCL | 8 / 18 (OLED 0x3C, MPU6050 0x68) |
-| MPU6050 INT | 7 |
+| I2C SDA / SCL | 8 / 18 (OLED 0x3C, ICM-20948 0x68/0x69, BME280 0x76/0x77) |
+| ICM-20948 INT | 7 |
 | GPS RX / TX (lado ESP) | 44 / 43 — `Serial1`, 9600 |
 | LoRa RX / TX / M0 / M1 / AUX (lado ESP) | 40 / 39 / 41 / 42 / 2 — `Serial2` |
 | I2S BCLK / LRC / DIN | 15 / 16 / 17 |
@@ -131,8 +129,8 @@ Formato: `$<TIPO>,<ID>,<SEQ>,<campos...>*<CK>\n`
 - `CK`: XOR de todos os bytes entre `$` e `*`, em 2 hex (estilo NMEA).
 - Tipos:
   - `MSG,<id>,<seq>,<texto>` — texto limitado a **48 caracteres**.
-  - `POS,<id>,<seq>,<lat>,<lon>,<alt>,<bat%>` — lat/lon 5 casas decimais
-    (~1 m), alt em m inteiro.
+  - `POS,<id>,<seq>,<lat>,<lon>,<alt>,<bat%>[,<baroAlt>]` — lat/lon 5 casas decimais
+    (~1 m), `alt` (GPS) e `baroAlt` opcional (barométrica) em m inteiro; decoder aceita 7 ou 8 campos mantendo retrocompatibilidade.
   - `PING,<id>,<seq>` / `ACK,<id>,<seq>,<seqConfirmado>`.
   - `SOS,<id>,<seq>,<lat>,<lon>,<bat%>` — ver "SOS em dois níveis".
   - `SEEN,<id>,<seq>,<seqDoSos>` — confirmação humana do SOS (o usuário apertou "Vi"); só vale para um SOS do episódio atual.
@@ -255,13 +253,18 @@ primeiro fix). Ponto a cada 10 s ou 20 m, o que vier primeiro. Flush a cada
 ponto e fechamento válido do XML (reescrever o rodapé) para sobreviver a
 corte de energia.
 
-### IMU
+### IMU (ICM-20948) e Barômetro (BME280)
 
-MPU6050 com interrupção de movimento no GPIO 7 → acorda tela. Queda:
+ICM-20948 (`0x68`/`0x69`, autodetectado) com Wake-on-Motion no GPIO 7 → acorda tela. Queda:
 pico ≥ 3 g seguido de assentamento (~1,5 s) e imobilidade por 30 s → contagem
 de SOS cancelável (sempre ativa, sem opção de desligar). Acelerômetro em ±8 g
-com giroscópio em standby; barramento I2C protegido por mutex compartilhado com
-o OLED. Limiares em constantes ajustáveis. Ver
+e magnetômetro interno AK09916 para bússola com compensação de inclinação,
+calibração hard/soft-iron (em Configurações) e declinação magnética configurável
+(padrão `-21,5°`). BME280 (`0x76`/`0x77`, autodetectado) lido a cada 5 s na
+mesma task: temperatura, umidade, pressão (histórico circular de 3 h com seta
+de tendência e alerta se queda > 2 hPa/3 h) e altitude barométrica calibrada
+pelo GPS (`sats >= 6`, `HDOP <= 2.0`). Barramento I2C protegido por mutex
+compartilhado com o OLED e scan no boot; sensores ausentes são tolerados. Ver
 `2026-11-25-etapa5b-imu-design.md`.
 
 ### Áudio

@@ -58,7 +58,11 @@ class RadioSink : public LinkSink {
         s.peerKnown = true;
         s.peerLat = p.lat;
         s.peerLon = p.lon;
-        if (p.type == PktType::POS) s.peerAlt = p.alt;
+        if (p.type == PktType::POS) {
+          s.peerAlt = p.alt;
+          s.peerHasBaroAlt = p.hasBaroAlt;
+          s.peerBaroAlt = p.baroAlt;
+        }
         s.peerPosMs = millis();
       }
       stateUnlock();
@@ -105,12 +109,21 @@ struct MyPos {
   double lat, lon;
   int32_t alt;
   uint8_t bat;
+  bool hasBaroAlt;
+  int32_t baroAlt;
 };
 
 MyPos myPos() {
   stateLock();
   const SharedState& s = state();
-  MyPos m{s.myPosKnown, s.gpsFix, s.lat, s.lon, (int32_t)s.altM, s.batteryPct};
+  MyPos m{s.myPosKnown,
+          s.gpsFix,
+          s.lat,
+          s.lon,
+          (int32_t)s.altM,
+          s.batteryPct,
+          s.bmeOk && s.baroAltValid,
+          (int32_t)lroundf(s.baroAltM)};
   stateUnlock();
   if (!m.known) m.lat = m.lon = 0;  // convenção do protocolo: posição desconhecida
   return m;
@@ -243,7 +256,7 @@ void radioTask(void*) {
       bool sosActive = ss == SosState::Sending || ss == SosState::Received;
       // Durante o SOS a posição já vai no próprio SOS: POS extra só gastaria ar e colidiria.
       if (posSched.due(millis(), m.fix) && !sosActive)
-        link.sendPos(m.lat, m.lon, m.alt, m.bat, millis());
+        link.sendPos(m.lat, m.lon, m.alt, m.bat, millis(), m.hasBaroAlt, m.baroAlt);
       if (sosActive && !sosManual && m.known && millis() - lastSosUpdate >= kSosUpdateMs) {
         link.updateSosPosition(m.lat, m.lon, m.bat);
         lastSosUpdate = millis();

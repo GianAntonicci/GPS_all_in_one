@@ -24,7 +24,9 @@ void setup() {
   stateInit();
   spiBusInit();
   i2cBusInit();
+  i2cBusScan();
   settingsLoad(gSettings);
+  imuConfigureCompass(gSettings.magCal, gSettings.magDeclination);
   radioStart(gSettings);
   uiStart(gSettings);
   imuStart();

@@ -91,11 +91,11 @@ FriendVec friendVec(const SharedState& s) {
   v.ok = true;
   v.dist = distanceM(s.lat, s.lon, s.peerLat, s.peerLon);
   double b = bearingDeg(s.lat, s.lon, s.peerLat, s.peerLon);
-  if (s.courseKnown) {
+  if (s.headingKnown) {
     v.relative = true;
-    v.rel = relativeBearingDeg(b, s.courseDeg);
+    v.rel = relativeBearingDeg(b, s.headingDeg);
     v.arrowDeg = v.rel;
-    v.stale = s.courseStale;
+    v.stale = s.headingStale;
   } else {
     v.arrowDeg = b;  // norte para cima
   }
@@ -236,6 +236,28 @@ void drawFriend(TFT_eSprite& f, const SharedState& s, uint32_t now) {
   }
 }
 
+void drawTrendArrow(TFT_eSprite& f, int16_t x, int16_t y, PressureTrend t) {
+  const uint16_t col = (t == PressureTrend::Falling) ? kRed
+                       : (t == PressureTrend::Rising) ? kGreen
+                                                      : kText;
+  switch (t) {
+    case PressureTrend::Rising:
+      f.fillTriangle(x + 5, y + 2, x, y + 10, x + 10, y + 10, col);
+      f.fillRect(x + 4, y + 10, 3, 5, col);
+      break;
+    case PressureTrend::Falling:
+      f.fillRect(x + 4, y + 2, 3, 5, col);
+      f.fillTriangle(x + 5, y + 15, x, y + 7, x + 10, y + 7, col);
+      break;
+    case PressureTrend::Steady:
+      f.fillRect(x, y + 7, 6, 3, col);
+      f.fillTriangle(x + 11, y + 8, x + 6, y + 4, x + 6, y + 12, col);
+      break;
+    case PressureTrend::Unknown:
+      break;
+  }
+}
+
 void drawGps(TFT_eSprite& f, const SharedState& s) {
   f.fillSprite(kBg);
   back(f, true);
@@ -243,28 +265,47 @@ void drawGps(TFT_eSprite& f, const SharedState& s) {
   f.setTextSize(1);
   f.setTextColor(kText);
   f.setTextDatum(TL_DATUM);
-  char b[48];
-  int16_t y = 36;
-  auto line = [&](const char* t) {
+  char b[56];
+  int16_t y = 32;
+  auto line = [&](const char* t, uint16_t col = kText) {
+    f.setTextColor(col);
     f.drawString(t, 10, y);
-    y += 22;
+    y += 20;
   };
-  snprintf(b, sizeof b, "Fix: %s   Satelites: %u", s.gpsFix ? "sim" : "nao", s.sats);
+  snprintf(b, sizeof b, "Fix: %s  Sats: %u  HDOP: %.1f", s.gpsFix ? "sim" : "nao", s.sats,
+           s.gpsHdop < 50.0f ? s.gpsHdop : 0.0f);
   line(b);
   if (s.myPosKnown) {
-    snprintf(b, sizeof b, "%s", s.gpsFix ? "Posicao:" : "Ultima posicao:");
-    line(b);
-    snprintf(b, sizeof b, "  %.5f, %.5f", s.lat, s.lon);
+    snprintf(b, sizeof b, "%s %.5f, %.5f", s.gpsFix ? "Pos:" : "Ult:", s.lat, s.lon);
     line(b);
   } else {
-    line("Posicao: desconhecida");
-    y += 22;
+    line("Pos: desconhecida");
   }
-  snprintf(b, sizeof b, "Altitude %.0f m   Vel. %.1f km/h", s.altM, s.speedKmh);
+  if (s.bmeOk && s.baroAltValid) {
+    snprintf(b, sizeof b, "Alt %.0f m (%s)  Vel %.1f km/h", s.baroAltM,
+             s.baroCalibrated ? "baro" : "baro*", s.speedKmh);
+  } else {
+    snprintf(b, sizeof b, "Alt %.0f m (GPS)  Vel %.1f km/h", s.altM, s.speedKmh);
+  }
   line(b);
-  if (s.courseKnown) snprintf(b, sizeof b, "Rumo %.0f graus%s", s.courseDeg, s.courseStale ? " (antigo)" : "");
-  else snprintf(b, sizeof b, "Rumo: --");
+  if (s.headingKnown) {
+    snprintf(b, sizeof b, "Rumo %.0f graus (%s)", s.headingDeg, headingSourceName(s.headingSource));
+  } else {
+    snprintf(b, sizeof b, "Rumo: --");
+  }
   line(b);
+  if (s.bmeOk) {
+    snprintf(b, sizeof b, "Temp %.1f C  Umid %.0f%%  %.1f hPa", s.tempC, s.humidityPct,
+             s.pressureHpa);
+    const int16_t ty = y;
+    line(b);
+    drawTrendArrow(f, 14 + f.textWidth(b), ty, s.pressureTrend);
+  } else {
+    line("Temp --  Umid --  Pressao --", kGrey);
+  }
+  if (s.pressureRapidDrop) {
+    line("Queda rapida! Possivel mudanca tempo", kRed);
+  }
   if (s.timeValid) {
     const DateTime& t = s.localTime;
     snprintf(b, sizeof b, "%02u/%02u/%04u %02u:%02u:%02u (UTC-3)", t.day, t.month, t.year, t.hour,
@@ -275,7 +316,7 @@ void drawGps(TFT_eSprite& f, const SharedState& s) {
   line(b);
   snprintf(b, sizeof b, "Bateria %u%% (%lu mV)%s", s.batteryPct, (unsigned long)s.batteryMv,
            s.batteryLow ? " BAIXA" : "");
-  line(b);
+  line(b, s.batteryLow ? kRed : kText);
   fmtTrackStatus(b, sizeof b, s.sdOk, s.trackRecording, s.trackPoints, s.timeValid, s.gpsFix);
   line(b);
 }
@@ -417,21 +458,49 @@ void drawSettings(TFT_eSprite& f, const SettingsView& v, uint8_t cursor) {
     centered(f, "Reiniciando...", 120, 4, 1, kText);
     return;
   }
+  if (v.calibrating || v.calDone) {
+    centered(f, "Calibrar bussola", 34, 4, 1, TFT_WHITE);
+    char b[48];
+    if (v.calibrating) {
+      centered(f, "Gire o aparelho em 8", 80, 2, 1, kSel);
+      centered(f, "em todas as direcoes", 100, 2, 1, kText);
+      const int16_t bx = 30, by = 132, bw = SCREEN_W - 60, bh = 22;
+      f.drawRect(bx, by, bw, bh, kGrey);
+      int16_t fw = (int16_t)((bw - 4) * v.calPct / 100);
+      if (fw > 0) f.fillRect(bx + 2, by + 2, fw, bh - 4, kSel);
+      snprintf(b, sizeof b, "%u%%  (%lu amostras)", v.calPct, (unsigned long)v.calSamples);
+      centered(f, b, 172, 2, 1, kText);
+      centered(f, "Clique = cancelar", 214, 2, 1, kGrey);
+    } else {
+      centered(f, v.calSuccess ? "Calibracao salva!" : "Falhou - gire mais", 115, 4, 1,
+               v.calSuccess ? kGreen : kRed);
+      snprintf(b, sizeof b, "%lu amostras", (unsigned long)v.calSamples);
+      centered(f, b, 152, 2, 1, kText);
+      centered(f, "Clique = voltar", 214, 2, 1, kGrey);
+    }
+    return;
+  }
   back(f, cursor == 0);
-  char b[40];
+  char b[48];
   if (v.editing == 1) {
     snprintf(b, sizeof b, "ID: [%c][%c]  (editando %u/2)", v.id[0], v.id[1] ? v.id[1] : ' ',
              v.idPos + 1);
   } else {
     snprintf(b, sizeof b, "ID: %s", v.id);
   }
-  row(f, 36, b, cursor == 1);
+  row(f, 30, b, cursor == 1, kText, 28);
   snprintf(b, sizeof b, "Brilho: %u%%%s", v.brightness, v.editing == 2 ? "  < girar >" : "");
-  row(f, 72, b, cursor == 2);
+  row(f, 58, b, cursor == 2, kText, 28);
   snprintf(b, sizeof b, "Volume: %u%%%s", v.volume, v.editing == 3 ? "  < girar >" : "");
-  row(f, 108, b, cursor == 3);
-  row(f, 144, "Canal: 921,15 MHz (fixo)", cursor == 4, kGrey);
-  if (v.idConflict) centered(f, "ID repetido! Mude o ID", 210, 2, 1, kRed);
+  row(f, 86, b, cursor == 3, kText, 28);
+  snprintf(b, sizeof b, "Declinacao: %+.1f deg%s", v.declination,
+           v.editing == 4 ? " < girar >" : "");
+  row(f, 114, b, cursor == 4, kText, 28);
+  snprintf(b, sizeof b, "Calibrar bussola (%s)",
+           !v.compassOk ? "--" : (v.compassCalibrated ? "ok" : "nao cal."));
+  row(f, 142, b, cursor == 5, v.compassOk ? kText : kGrey, 28);
+  row(f, 170, "Canal: 921,15 MHz (fixo)", cursor == 6, kGrey, 28);
+  if (v.idConflict) centered(f, "ID repetido! Mude o ID", 220, 2, 1, kRed);
 }
 
 void drawOverlay(TFT_eSprite& f, Overlay o, const SharedState& s, uint8_t left, uint32_t now) {
