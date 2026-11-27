@@ -480,6 +480,51 @@ void drawSettings(TFT_eSprite& f, const SettingsView& v, uint8_t cursor) {
     }
     return;
   }
+  if (v.mountMode != 0) {
+    char b[48];
+    if (v.mountMode == 1) {
+      back(f, v.mountMenuIdx == 0);
+      row(f, 36, "Modo assistido (2 passos)", v.mountMenuIdx == 1, v.imuOk ? kText : kGrey, 30);
+      snprintf(b, sizeof b, "Preset: %s", imuMountName(v.imuMount));
+      row(f, 70, b, v.mountMenuIdx == 2, kText, 30);
+      centered(f, "Mudar orientacao invalida", 160, 2, 1, kGrey);
+      centered(f, "a calibracao da bussola", 180, 2, 1, kGrey);
+      return;
+    }
+    if (v.mountMode == 2) {
+      centered(f, "Orientacao da IMU", 36, 4, 1, TFT_WHITE);
+      snprintf(b, sizeof b, "%u/%u", (unsigned)static_cast<uint8_t>(v.imuMount) + 1,
+               (unsigned)kImuMountCount);
+      centered(f, b, 78, 2, 1, kGrey);
+      centered(f, imuMountName(v.imuMount), 120, 4, 1, kSel);
+      centered(f, "< girar: trocar   clique: salvar >", 198, 2, 1, kGrey);
+      return;
+    }
+    if (v.mountMode == 3) {
+      centered(f, "Modo assistido 1/2", 34, 4, 1, TFT_WHITE);
+      centered(f, "Deixe o aparelho deitado", 92, 2, 1, kSel);
+      centered(f, "com a tela para cima", 114, 2, 1, kSel);
+      centered(f, "Clique para capturar", 188, 2, 1, kText);
+      return;
+    }
+    if (v.mountMode == 4) {
+      centered(f, "Modo assistido 2/2", 34, 4, 1, TFT_WHITE);
+      centered(f, "Incline o topo da tela", 92, 2, 1, kSel);
+      centered(f, "para baixo (~90 graus)", 114, 2, 1, kSel);
+      centered(f, "Clique para capturar", 188, 2, 1, kText);
+      return;
+    }
+    centered(f, "Orientacao da IMU", 34, 4, 1, TFT_WHITE);
+    if (v.mountAssistOk) {
+      centered(f, imuMountName(v.imuMount), 102, 4, 1, kGreen);
+      centered(f, "Salvo! Recalibre a bussola", 146, 2, 1, kSel);
+    } else {
+      centered(f, "Falha na deteccao", 102, 4, 1, kRed);
+      centered(f, "Incline mais e tente de novo", 146, 2, 1, kText);
+    }
+    centered(f, "Clique = voltar", 206, 2, 1, kGrey);
+    return;
+  }
   back(f, cursor == 0);
   char b[48];
   if (v.editing == 1) {
@@ -488,19 +533,21 @@ void drawSettings(TFT_eSprite& f, const SettingsView& v, uint8_t cursor) {
   } else {
     snprintf(b, sizeof b, "ID: %s", v.id);
   }
-  row(f, 30, b, cursor == 1, kText, 28);
+  row(f, 28, b, cursor == 1, kText, 27);
   snprintf(b, sizeof b, "Brilho: %u%%%s", v.brightness, v.editing == 2 ? "  < girar >" : "");
-  row(f, 58, b, cursor == 2, kText, 28);
+  row(f, 55, b, cursor == 2, kText, 27);
   snprintf(b, sizeof b, "Volume: %u%%%s", v.volume, v.editing == 3 ? "  < girar >" : "");
-  row(f, 86, b, cursor == 3, kText, 28);
+  row(f, 82, b, cursor == 3, kText, 27);
   snprintf(b, sizeof b, "Declinacao: %+.1f deg%s", v.declination,
            v.editing == 4 ? " < girar >" : "");
-  row(f, 114, b, cursor == 4, kText, 28);
+  row(f, 109, b, cursor == 4, kText, 27);
   snprintf(b, sizeof b, "Calibrar bussola (%s)",
            !v.compassOk ? "--" : (v.compassCalibrated ? "ok" : "nao cal."));
-  row(f, 142, b, cursor == 5, v.compassOk ? kText : kGrey, 28);
-  row(f, 170, "Canal: 921,15 MHz (fixo)", cursor == 6, kGrey, 28);
-  if (v.idConflict) centered(f, "ID repetido! Mude o ID", 220, 2, 1, kRed);
+  row(f, 136, b, cursor == 5, v.compassOk ? kText : kGrey, 27);
+  snprintf(b, sizeof b, "Orientacao IMU: %s", imuMountName(v.imuMount));
+  row(f, 163, b, cursor == 6, kText, 27);
+  row(f, 190, "Canal: 921,15 MHz (fixo)", cursor == 7, kGrey, 27);
+  if (v.idConflict) centered(f, "ID repetido! Mude o ID", 228, 2, 1, kRed);
 }
 
 void drawOverlay(TFT_eSprite& f, Overlay o, const SharedState& s, uint8_t left, uint32_t now) {

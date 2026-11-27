@@ -68,6 +68,7 @@ bool gScreenWasOn = true;
 
 // Configurações em edição
 ui::SettingsView gSetView{};
+float gMountFlatAx = 0.0f, gMountFlatAy = 0.0f, gMountFlatAz = 0.0f;
 
 Screen top() { return gStack[gDepth - 1]; }
 
@@ -82,7 +83,7 @@ uint8_t itemCount(Screen s) {
       return (e.mine && e.status == MsgStatus::Failed) ? 2 : 1;
     }
     case Screen::Keyboard: return (uint8_t)(1 + gKeyboard.keyCount());
-    case Screen::Settings: return 7;
+    case Screen::Settings: return 8;
     default: return 1;  // só "Voltar"
   }
 }
@@ -166,7 +167,17 @@ void saveSettings() {
   gSet->brightness = brightnessRawFromPct(gSetView.brightness);
   gSet->volume = gSetView.volume;
   gSet->magDeclination = gSetView.declination;
+  gSet->imuMount = gSetView.imuMount;
   settingsSave(*gSet);
+}
+
+void applyNewMount(ImuMount m, uint32_t now) {
+  gSetView.imuMount = m;
+  gSet->imuMount = m;
+  gSet->magCal = MagCal{};  // invalida calibração da bússola ao trocar orientação
+  settingsSave(*gSet);
+  imuSetMount(m, true);
+  banner("Recalibre a bussola", now, 3500);
 }
 
 char nextIdChar(char c, int8_t d) {
@@ -194,6 +205,74 @@ void onSettingsInput(int8_t d, Gesture g, uint32_t now) {
   if (v.calDone) {
     if (g == Gesture::Click) {
       v.calDone = false;
+      gDirty = true;
+    }
+    return;
+  }
+  if (v.mountMode != 0) {
+    if (v.mountMode == 1) {
+      if (d) {
+        int idx = ((int)v.mountMenuIdx + d) % 3;
+        if (idx < 0) idx += 3;
+        v.mountMenuIdx = (uint8_t)idx;
+      }
+      if (g == Gesture::Click) {
+        if (v.mountMenuIdx == 0) {
+          v.mountMode = 0;
+        } else if (v.mountMenuIdx == 1) {
+          if (v.imuOk) v.mountMode = 3;
+          else banner("IMU indisponivel", now, 2000);
+        } else {
+          v.mountMode = 2;
+        }
+      }
+      gDirty = true;
+      return;
+    }
+    if (v.mountMode == 2) {
+      if (d) {
+        int idx = ((int)static_cast<uint8_t>(v.imuMount) + d) % (int)kImuMountCount;
+        if (idx < 0) idx += kImuMountCount;
+        v.imuMount = static_cast<ImuMount>(idx);
+      }
+      if (g == Gesture::Click) {
+        const bool changed = (v.imuMount != gSet->imuMount);
+        if (changed) applyNewMount(v.imuMount, now);
+        v.mountMode = 0;
+      }
+      gDirty = true;
+      return;
+    }
+    if (v.mountMode == 3) {
+      if (g == Gesture::Click) {
+        if (imuCaptureRawAccel(gMountFlatAx, gMountFlatAy, gMountFlatAz)) {
+          v.mountMode = 4;
+        } else {
+          v.mountAssistOk = false;
+          v.mountMode = 5;
+        }
+      }
+      gDirty = true;
+      return;
+    }
+    if (v.mountMode == 4) {
+      if (g == Gesture::Click) {
+        float tx = 0, ty = 0, tz = 0;
+        ImuMount detected = v.imuMount;
+        if (imuCaptureRawAccel(tx, ty, tz) &&
+            detectMountAssisted(gMountFlatAx, gMountFlatAy, gMountFlatAz, tx, ty, tz, detected)) {
+          applyNewMount(detected, now);
+          v.mountAssistOk = true;
+        } else {
+          v.mountAssistOk = false;
+        }
+        v.mountMode = 5;
+      }
+      gDirty = true;
+      return;
+    }
+    if (g == Gesture::Click) {
+      v.mountMode = 0;
       gDirty = true;
     }
     return;
@@ -273,6 +352,10 @@ void onSettingsInput(int8_t d, Gesture g, uint32_t now) {
           banner("Bussola indisponivel", now, 2000);
         }
         break;
+      case 6:
+        v.mountMode = 1;
+        v.mountMenuIdx = 0;
+        break;
       default: break;  // canal: só leitura
     }
   }
@@ -319,10 +402,13 @@ void onScreenInput(int8_t d, Gesture g, uint32_t now) {
         gSetView.brightness = brightnessPctFromRaw(gSet->brightness);
         gSetView.volume = (uint8_t)((gSet->volume + 5) / 10 * 10);
         gSetView.declination = gSet->magDeclination;
+        gSetView.imuMount = gSet->imuMount;
         gSetView.editing = -1;
         gSetView.restarting = false;
         gSetView.calibrating = false;
         gSetView.calDone = false;
+        gSetView.mountMode = 0;
+        gSetView.mountMenuIdx = 0;
       }
       if (kTargets[i] == Screen::Scanner) gScanner.reset();
       push(kTargets[i]);
@@ -452,6 +538,7 @@ void draw(const SharedState& s, uint32_t now) {
       case Screen::Gps: ui::drawGps(f, s); break;
       case Screen::Settings:
         gSetView.idConflict = s.idConflict;
+        gSetView.imuOk = s.imuOk;
         gSetView.compassOk = s.compassOk;
         gSetView.compassCalibrated = s.compassCalibrated;
         ui::drawSettings(f, gSetView, c);

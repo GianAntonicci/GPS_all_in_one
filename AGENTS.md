@@ -10,7 +10,7 @@ Todas as etapas planejadas (**0 a 5c**) estão implementadas e mergeadas em `mai
 - **3:** UI no TFT ST7789 240×320, encoder rotativo, OLED SSD1306 128×32, NVS, overlays de SOS.
 - **4:** Mapa offline (`/tiles/{z}/{x}/{y}.jpg` JPEG baseline) com cache LRU em PSRAM, trilha GPX em task dedicada, sonda de remoção do SD e script `tools/prepare_tiles.py`.
 - **5a:** Áudio I2S (MAX98357A) em task dedicada com sequenciador de tons e prioridade.
-- **5b:** IMU 9DoF (ICM-20948 `0x68/0x69`, WoM no GPIO 7, detecção de queda e bússola AK09916 com calibração hard/soft-iron e declinação na NVS) + Barômetro BME280 (`0x76/0x77`, altitude barométrica calibrada pelo GPS, temperatura, umidade, pressão e tendência 3 h) na task `imu` sob mutex I2C + scan I2C no boot.
+- **5b:** IMU 9DoF (ICM-20948 `0x68/0x69`, WoM no GPIO 7, detecção de queda, remapeamento configurável em 24 orientações + modo assistido e bússola AK09916 com calibração hard/soft-iron e declinação na NVS) + Barômetro BME280 (`0x76/0x77`, altitude barométrica calibrada pelo GPS, temperatura, umidade, pressão e tendência 3 h) na task `imu` sob mutex I2C + scan I2C no boot.
 - **5c:** Scanner CC1101 somente-RX em driver mínimo próprio no SPI compartilhado.
 
 > **Hardware ainda não montado fisicamente.** Toda lógica pura fica em `lib/` (testada no host via `pio test -e native`) e o firmware inteiro precisa compilar limpo via `pio run -e esp32s3`. Limiares físicos (IMU, RF, debounce) estão em constantes ajustáveis para calibração na primeira montagem.
@@ -18,7 +18,7 @@ Todas as etapas planejadas (**0 a 5c**) estão implementadas e mergeadas em `mai
 ## Comandos Essenciais
 
 ```bash
-pio test -e native                                  # Suíte completa no host (269 testes Unity, 25 suítes)
+pio test -e native                                  # Suíte completa no host (274 testes Unity, 26 suítes)
 pio test -e native -f test_<nome>                   # Rodar uma suíte específica
 pio run -e esp32s3                                  # Compilar firmware ESP32-S3 N16R8
 pio run -e esp32s3 -t upload                        # Gravar via USB CDC
@@ -27,7 +27,7 @@ python3 -m pytest tools/test_prepare_tiles.py -q    # Testes do script de prepar
 
 ## Arquitetura
 
-- **`lib/` (C++17 puro, SEM Arduino):** `protocol`, `geo`, `power`, `ui_logic`, `map`, `track`, `audio`, `imu` (`FallDetector` + `compass`), `env` (`BaroAltimeter` + `PressureHistory`), `scanner`. Deve sempre compilar em `[env:native]` com `-std=gnu++17 -Wall`.
+- **`lib/` (C++17 puro, SEM Arduino):** `protocol`, `geo`, `power`, `ui_logic`, `map`, `track`, `audio`, `imu` (`FallDetector` + `compass` + `mount`), `env` (`BaroAltimeter` + `PressureHistory`), `scanner`. Deve sempre compilar em `[env:native]` com `-std=gnu++17 -Wall`.
 - **`src/` (ESP32-S3 / Arduino / FreeRTOS):** drivers, barramentos, estado compartilhado e 5 tasks:
   - Core 0: `radio` (prio 2: LoRa, GPS, protocolo, SOS, bateria), `sd` (prio 1: GPX e trilha em PSRAM).
   - Core 1: `audio` (prio 3: síntese I2S), `ui` (prio 2: encoder, TFT, OLED, mapa, scanner), `imu` (prio 1: ICM-20948 acordado por GPIO 7 + bússola + BME280 a cada 5 s).

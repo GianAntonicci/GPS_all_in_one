@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include "config.h"
 #include "geo.h"
+#include "imu.h"
 #include "radio_task.h"
 #include "state.h"
 #include "ui.h"
@@ -11,6 +12,8 @@ namespace {
 
 char gLine[96];
 size_t gLen = 0;
+bool gImuAxesActive = false;
+uint32_t gImuAxesLastMs = 0;
 
 const char* sosName(SosState s) {
   switch (s) {
@@ -56,9 +59,10 @@ void printSensors() {
   stateLock();
   SharedState s = state();
   stateUnlock();
-  Serial.printf("[SENSORS] ICM-20948: %s (addr=0x%02X) mag=%s cal=%s decl=%+.1f deg\n",
-                s.imuOk ? "ok" : "AUSENTE", s.imuAddr, s.compassOk ? "ok" : "AUSENTE",
-                s.compassCalibrated ? "sim" : "nao", s.magDeclination);
+  Serial.printf("[SENSORS] ICM-20948: %s (addr=0x%02X) mount=%s mag=%s cal=%s decl=%+.1f deg\n",
+                s.imuOk ? "ok" : "AUSENTE", s.imuAddr, imuMountName(s.imuMount),
+                s.compassOk ? "ok" : "AUSENTE", s.compassCalibrated ? "sim" : "nao",
+                s.magDeclination);
   if (s.compassOk) {
     Serial.printf("[SENSORS] bussola: %.1f graus\n", s.compassDeg);
   }
@@ -142,11 +146,24 @@ void handleLine(char* line) {
     printStatus();
   } else if (strcmp(line, "sensors") == 0) {
     printSensors();
+  } else if (strcmp(line, "imu axes") == 0) {
+    stateLock();
+    const SharedState s = state();
+    stateUnlock();
+    if (!s.imuOk) {
+      Serial.println("[IMU] ICM-20948 ausente");
+    } else {
+      gImuAxesActive = true;
+      gImuAxesLastMs = 0;
+      imuSetMonitorActive(true);
+      Serial.printf("[IMU] Monitor de eixos (mount=%s). Tela p/ cima -> az~+1g; topo p/ baixo -> ax~-1g. Enter para parar.\n",
+                    imuMountName(s.imuMount));
+    }
   } else if (strcmp(line, "fall") == 0) {
     Serial.println("[IMU] simulando queda (contagem SOS)");
     uiRequestSosCountdown();
   } else if (*line) {
-    Serial.println("Comandos: ping | msg <texto> | pos <lat> <lon> | sos [<lat> <lon>] | cancel | vi | gps | sensors | fall | status");
+    Serial.println("Comandos: ping | msg <texto> | pos <lat> <lon> | sos [<lat> <lon>] | cancel | vi | gps | sensors | imu axes | fall | status");
   }
 }
 
@@ -158,10 +175,33 @@ void consolePoll() {
     if (ch == '\r') continue;
     if (ch == '\n') {
       gLine[gLen] = 0;
-      handleLine(gLine);
+      if (gImuAxesActive) {
+        gImuAxesActive = false;
+        imuSetMonitorActive(false);
+        Serial.println("[IMU] Monitor de eixos encerrado.");
+      } else {
+        handleLine(gLine);
+      }
       gLen = 0;
     } else if (gLen + 1 < sizeof gLine) {
       gLine[gLen++] = (char)ch;
+    }
+  }
+  if (gImuAxesActive) {
+    const uint32_t now = millis();
+    if (gImuAxesLastMs == 0 || (uint32_t)(now - gImuAxesLastMs) >= 1000) {
+      gImuAxesLastMs = now;
+      stateLock();
+      const SharedState s = state();
+      stateUnlock();
+      if (s.compassOk) {
+        Serial.printf("[IMU] %s | accel=(%+.2f, %+.2f, %+.2f) g | rumo=%.1f deg (%s)\n",
+                      imuMountName(s.imuMount), s.accelX, s.accelY, s.accelZ, s.compassDeg,
+                      s.compassCalibrated ? "cal" : "nao-cal");
+      } else {
+        Serial.printf("[IMU] %s | accel=(%+.2f, %+.2f, %+.2f) g | rumo=--\n",
+                      imuMountName(s.imuMount), s.accelX, s.accelY, s.accelZ);
+      }
     }
   }
 }

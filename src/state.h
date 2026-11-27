@@ -5,6 +5,7 @@
 #include "compass.h"
 #include "gps_logic.h"
 #include "lora_link.h"
+#include "mount.h"
 
 struct SharedState {
   bool loraOk = false;
@@ -56,6 +57,8 @@ struct SharedState {
   // ---- IMU / Bússola ICM-20948 (task "imu") ----
   bool imuOk = false;
   uint8_t imuAddr = 0;
+  ImuMount imuMount = ImuMount::PLACA_PADRAO;
+  float accelX = 0.0f, accelY = 0.0f, accelZ = 0.0f;  // aceleração remapeada em g
   bool compassOk = false;
   bool compassCalibrated = false;
   float compassDeg = 0.0f;

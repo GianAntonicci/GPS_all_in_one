@@ -3,6 +3,7 @@
 #include <TFT_eSPI.h>
 #include <cstdint>
 #include "keyboard.h"
+#include "mount.h"
 #include "msg_history.h"
 #include "scanner_model.h"
 #include "sos_overlay.h"
@@ -37,6 +38,7 @@ struct SettingsView {
   uint8_t idPos;               // caractere do ID em edição (0/1)
   bool idConflict;
   bool restarting;
+  bool imuOk;
   bool compassOk;
   bool compassCalibrated;
   bool calibrating;
@@ -44,8 +46,15 @@ struct SettingsView {
   bool calSuccess;
   uint8_t calPct;
   uint32_t calSamples;
+  ImuMount imuMount;
+  // Sub-modo Orientação da IMU:
+  // 0 = lista principal, 1 = menu (Voltar/Assistido/Manual), 2 = preset manual,
+  // 3 = assistido passo 1 (deitado), 4 = assistido passo 2 (topo p/ baixo), 5 = resultado
+  uint8_t mountMode;
+  uint8_t mountMenuIdx;
+  bool mountAssistOk;
 };
-// cursor: 0 = Voltar, 1 = ID, 2 = Brilho, 3 = Volume, 4 = Declinacao, 5 = Calibrar bussola, 6 = Canal
+// cursor: 0=Voltar, 1=ID, 2=Brilho, 3=Volume, 4=Declinacao, 5=Calibrar bussola, 6=Orientacao IMU, 7=Canal
 void drawSettings(TFT_eSprite& f, const SettingsView& v, uint8_t cursor);
 
 void drawOverlay(TFT_eSprite& f, Overlay o, const SharedState& s, uint8_t countdownLeft,
