@@ -19,7 +19,7 @@ Firmware completo em **PlatformIO (Arduino / FreeRTOS)** para um par de disposit
   - **Mapa offline:** tiles 256×256 do cartão microSD (`/tiles/{z}/{x}/{y}.jpg`) com cache LRU em PSRAM (~24 tiles), sua posição (seta orientada pelo rumo unificado), posição do amigo (ou seta na borda se fora da tela), linha da trilha da sessão e zoom pelo encoder.
   - **GPS:** coordenadas, altitude barométrica calibrada pelo GPS (com fallback para altitude GPS), velocidade, satélites, HDOP, temperatura, umidade, pressão com seta de tendência (`↑ / → / ↓`) e alerta de queda rápida (`> 2 hPa` em 3 h), hora local (UTC-3) e estado da gravação GPX.
   - **Scanner CC1101 (somente RX):** espectro de 60 barras + peak-hold nas faixas **433**, **868** e **915 MHz**; entra em sleep (`SIDLE` + `SPWD`) fora da tela.
-  - **Configurações:** ID do aparelho (2 caracteres), brilho do TFT, volume, declinação magnética (padrão `-21,5°` para São Paulo) e modo **Calibrar bússola** (girar em 8 por ~20 s), salvos na NVS; canal LoRa exibido apenas para leitura.
+  - **Configurações:** ID do aparelho (2 caracteres), brilho do TFT, volume, declinação magnética (padrão `-21,5°` para São Paulo), modo **Calibrar bússola** (girar em 8 por ~20 s) e **Orientação da IMU** (preset manual entre 24 rotações ou modo assistido em 2 passos), salvos na NVS; canal LoRa exibido apenas para leitura.
   - **OLED sempre ligado:** hora local, bateria %, satélites, barra de sinal/idade do amigo, ícone de mensagem nova e avisos de SOS.
   - **Economia de energia:** TFT apaga após 30 s sem interação e acorda por encoder, movimento (IMU) ou mensagem/SOS recebido.
 - **Trilha GPX (`/tracks/AAAAMMDD_HHMMSS.gpx`):** grava ponto a cada 10 s ou 20 m com flush e fechamento válido de XML a cada ponto (resiste a corte abrupto de energia).
@@ -96,10 +96,10 @@ O firmware separa **lógica pura testável no host** (`lib/`, sem dependência d
 │   ├── map/                # Projeção slippy map, seta de borda, cache LRU
 │   ├── track/              # Política de pontos, buffer de trilha, GPX, sonda SD
 │   ├── audio/              # ToneSequencer (prioridades/volume) e AudioCues
-│   ├── imu/                # FallDetector e bússola (tilt compensation, calibração, fonte de rumo)
+│   ├── imu/                # FallDetector, bússola (tilt/cal/rumo) e mount (24 orientações + assistido)
 │   ├── env/                # BaroAltimeter (calibração GPS + EMA) e PressureHistory (3 h)
 │   └── scanner/            # Frequência 26 MHz, RSSI dBm e ScannerModel
-├── test/                   # 25 suítes Unity (269 testes rodando no PC)
+├── test/                   # 26 suítes Unity (274 testes rodando no PC)
 ├── tools/                  # Script Python para converter tiles de mapa (JPEG baseline)
 └── docs/                   # Guia de mapas offline, specs de design e planos
 ```
@@ -137,7 +137,7 @@ cd GPS_all_in_one
 pio test -e native
 ```
 
-Executa todas as 25 suítes (`269` testes) validando protocolo LoRa, SOS, GPS, bateria, UI, mapa, GPX, áudio, detector de queda, bússola, barômetro e scanner.
+Executa todas as 26 suítes (`274` testes) validando protocolo LoRa, SOS, GPS, bateria, UI, mapa, GPX, áudio, detector de queda, bússola, orientação da IMU, barômetro e scanner.
 
 ### 4. Compilar o firmware para o ESP32-S3
 
@@ -201,7 +201,27 @@ Consulte o guia completo em [docs/mapas-offline.md](docs/mapas-offline.md).
 1. Ligue os dois aparelhos. Cada um gera um ID padrão de 2 caracteres a partir do MAC (ex.: `A1`, `B7`).
 2. Se por acaso os dois tiverem o mesmo ID (o OLED e as Configurações exibem alerta de conflito), abra **Configurações → ID**, ajuste um deles e confirme (o aparelho reinicia automaticamente).
 3. Ajuste **Brilho**, **Volume** e **Declinação magnética** (padrão `-21,5°` para São Paulo) em **Configurações** (o volume dá prévia sonora ao girar; lembrar que os sons de SOS tocam alto mesmo com volume 0).
-4. Execute **Configurações → Calibrar bússola** girando o aparelho em formato de **8** em todas as direções por ~20 s para salvar offsets/escalas na NVS.
+4. Configure **Configurações → Orientação IMU** (se a placa ICM-20948 não estiver na posição padrão) — veja a seção abaixo.
+5. Execute **Configurações → Calibrar bússola** girando o aparelho em formato de **8** em todas as direções por ~20 s para salvar offsets/escalas na NVS (sempre recalibre após mudar a orientação da IMU).
+
+### Montagem e Orientação da IMU (ICM-20948)
+
+O firmware usa o seguinte **referencial lógico do aparelho** (regra da mão direita):
+- **`+X`**: aponta para o **topo da tela** (frente do aparelho);
+- **`+Y`**: aponta para a **esquerda da tela**;
+- **`+Z`**: aponta **para cima** (saindo perpendicularmente da tela).
+
+A placa do ICM-20948 pode ser fixada em qualquer uma das **24 orientações de 90°** dentro da caixa (padrão em `src/config.h`: `IMU_MOUNT_DEFAULT = 0` / `PLACA_PADRAO`, sobrescrito pela NVS). O remapeamento é aplicado ao acelerômetro, giroscópio e magnetômetro (já após a correção interna Y/Z do AK09916) antes de qualquer cálculo de rumo, inclinação ou queda.
+
+**Como configurar pelo modo assistido (recomendado):**
+1. Abra **Configurações → Orientacao IMU → Modo assistido (2 passos)**.
+2. **Passo 1:** deixe o aparelho deitado sobre uma mesa com a **tela para cima** e clique no encoder (detecta `+Z`).
+3. **Passo 2:** incline o **topo da tela para baixo** (~90°) e clique no encoder (detecta `-X` → `+X`).
+4. O aparelho calcula e salva a orientação automaticamente na NVS, invalida a calibração anterior da bússola e avisa **"Recalibre a bussola"**.
+
+**Como conferir pelo console serial:** digite `imu axes` no monitor serial (1 Hz até apertar Enter) e verifique:
+- tela para cima → `az ≈ +1.00 g`;
+- topo da tela para baixo → `ax ≈ -1.00 g`.
 
 ---
 
@@ -212,7 +232,8 @@ Com `-DDEBUG_LOG=1`, você pode operar e inspecionar o aparelho pelo monitor ser
 | Comando | Ação |
 |---|---|
 | `status` | Exibe estado de `lora`, `imu` (e endereço), `mag`, `bme` (e endereço), `cc1101`, SOS, último contato, RSSI e distância/rumo até o amigo |
-| `sensors` | Exibe detalhes do ICM-20948 (bússola, calibração, declinação), BME280 (temp, umidade, pressão, tendência 3 h, altitude barométrica) e rumo atual + fonte |
+| `sensors` | Exibe detalhes do ICM-20948 (orientação, bússola, calibração, declinação), BME280 (temp, umidade, pressão, tendência 3 h, altitude barométrica) e rumo atual + fonte |
+| `imu axes` | Mostra a orientação atual e, a 1 Hz (até apertar Enter), aceleração remapeada `(ax, ay, az)` em `g` e rumo para conferir a montagem |
 | `gps` | Exibe fix, satélites, coordenadas, altitude, velocidade, rumo, hora UTC-3 e bateria |
 | `ping` | Envia um `PING` ao outro aparelho |
 | `msg <texto>` | Envia uma mensagem curta (até 48 caracteres ASCII) |
